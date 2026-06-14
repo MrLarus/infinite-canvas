@@ -1,6 +1,6 @@
 "use client";
 
-import { App, Button, Form, Input, Modal, Progress, Segmented, Select } from "antd";
+import { App, Button, Form, Input, Modal, Progress, Segmented, Select, Switch } from "antd";
 import { Cloud, RefreshCw, Wifi } from "lucide-react";
 import { useState } from "react";
 
@@ -63,6 +63,7 @@ export function AppConfigModal() {
     const webdav = useConfigStore((state) => state.webdav);
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const updateWebdavConfig = useConfigStore((state) => state.updateWebdavConfig);
+    const patchWebdavConfig = useConfigStore((state) => state.patchWebdavConfig);
     const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
     const shouldPromptContinue = useConfigStore((state) => state.shouldPromptContinue);
     const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
@@ -78,16 +79,13 @@ export function AppConfigModal() {
     const webdavReady = Boolean(normalizedWebdav.url);
 
     const persistNormalizedWebdav = () => {
-        updateWebdavConfig("proxyMode", normalizedWebdav.proxyMode);
-        updateWebdavConfig("url", normalizedWebdav.url);
-        updateWebdavConfig("directory", normalizedWebdav.directory);
-        updateWebdavConfig("username", normalizedWebdav.username);
-        updateWebdavConfig("password", normalizedWebdav.password);
+        patchWebdavConfig(normalizedWebdav);
         return normalizedWebdav;
     };
 
     const finishConfig = () => {
-        persistNormalizedWebdav();
+        const savedWebdav = persistNormalizedWebdav();
+        if (shouldMarkWebdavConfigured(savedWebdav)) patchWebdavConfig({ configuredAt: savedWebdav.configuredAt || new Date().toISOString() });
         setConfigDialogOpen(false);
         if (effectiveMode === "local" && (!config.baseUrl.trim() || !config.apiKey.trim())) return;
         if (!modelConfig.imageModel.trim() || !modelConfig.videoModel.trim() || !modelConfig.textModel.trim()) return;
@@ -145,6 +143,7 @@ export function AppConfigModal() {
         try {
             const config = persistNormalizedWebdav();
             await testWebdavConnection(config);
+            patchWebdavConfig({ configuredAt: config.configuredAt || new Date().toISOString(), lastAutoSyncError: "" });
             message.success("WebDAV 连接可用");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "WebDAV 连接测试失败");
@@ -179,7 +178,7 @@ export function AppConfigModal() {
         try {
             const config = persistNormalizedWebdav();
             const result = await syncAppDataToWebdav(config, updateWebdavProgress);
-            updateWebdavConfig("lastSyncedAt", result.syncedAt);
+            patchWebdavConfig({ configuredAt: config.configuredAt || new Date().toISOString(), lastSyncedAt: result.syncedAt, lastAutoSyncedAt: result.syncedAt, lastAutoSyncError: "" });
             message.success(`同步完成：${result.projects} 个画布，${result.assets} 个素材，${result.imageLogs + result.videoLogs} 条记录，本次上传 ${result.uploadedFiles} 个文件 ${formatBytes(result.uploadedBytes)}`);
         } catch (error) {
             setWebdavSyncStatus(error instanceof Error ? error.message : "WebDAV 同步失败");
@@ -341,6 +340,15 @@ export function AppConfigModal() {
                                     ]}
                                 />
                             </Form.Item>
+                            <Form.Item label="自动同步" className="mb-4 md:col-span-2">
+                                <div className="flex items-center justify-between gap-3 rounded-md border border-stone-200 px-3 py-2 dark:border-stone-800">
+                                    <div className="min-w-0">
+                                        <div className="text-sm font-medium text-stone-900 dark:text-stone-100">开启自动同步</div>
+                                        <div className="text-xs text-stone-500">页面打开后自动合并，并在本地变更后自动上传。</div>
+                                    </div>
+                                    <Switch checked={webdav.autoSyncEnabled} onChange={(checked) => patchWebdavConfig({ autoSyncEnabled: checked })} />
+                                </div>
+                            </Form.Item>
                             <Form.Item label="WebDAV 地址" className="mb-4">
                                 <Input value={webdav.url} placeholder="https://nas.example.com/webdav" autoComplete="off" onChange={(event) => updateWebdavConfig("url", event.target.value)} />
                             </Form.Item>
@@ -362,6 +370,11 @@ export function AppConfigModal() {
                                 {syncingWebdav ? "同步中" : "立即同步"}
                             </Button>
                             {webdavSyncStatus ? <span className="text-xs text-stone-500">{webdavSyncStatus}</span> : null}
+                        </div>
+                        <div className="mt-3 grid gap-2 text-xs text-stone-500 md:grid-cols-3">
+                            <div>自动同步：{webdav.autoSyncEnabled ? "开启" : "关闭"}</div>
+                            <div>最近自动同步：{webdav.lastAutoSyncedAt ? formatWebdavTime(webdav.lastAutoSyncedAt) : "尚未同步"}</div>
+                            <div className="truncate">最近错误：{webdav.lastAutoSyncError || "无"}</div>
                         </div>
                         {syncingWebdav || webdavSyncStatus ? (
                             <div className="mt-3 grid gap-2">
@@ -406,6 +419,10 @@ function uniqueModels(models: string[]) {
 
 function formatWebdavTime(value: string) {
     return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function shouldMarkWebdavConfigured(webdav: ReturnType<typeof normalizeWebdavConfig>) {
+    return Boolean(webdav.configuredAt || webdav.lastSyncedAt || webdav.username || webdav.password);
 }
 
 function getWebdavProgressPercent(item: WebdavDomainProgress) {

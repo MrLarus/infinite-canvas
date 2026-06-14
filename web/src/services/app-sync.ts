@@ -10,6 +10,7 @@ import { useAssetStore } from "@/stores/use-asset-store";
 import type { WebdavSyncConfig } from "@/stores/use-config-store";
 import type { CanvasProject } from "@/app/(user)/canvas/stores/use-canvas-store";
 import { useCanvasStore } from "@/app/(user)/canvas/stores/use-canvas-store";
+import { runWithoutAppDataDirtySignal } from "@/services/app-sync-events";
 
 type StoredLog = Record<string, unknown> & { id?: string };
 export type AppSyncDomainKey = "canvas" | "assets" | "image-workbench" | "video-workbench";
@@ -149,7 +150,9 @@ async function syncDomain<T>(config: WebdavSyncConfig, onProgress: AppSyncProgre
             emitProgress(onProgress, { domain: options.key, label: options.label, stage: "下载缺失媒体", status: "active" });
             await downloadMissingFiles(config, options.key, mergedData, remoteManifest.files, onProgress);
             emitProgress(onProgress, { domain: options.key, label: options.label, stage: "写入本地合并结果", status: "active" });
-            await options.applyData?.(mergedData);
+            await runWithoutAppDataDirtySignal(async () => {
+                await options.applyData?.(mergedData);
+            });
         }
 
         emitProgress(onProgress, { domain: options.key, label: options.label, stage: "上传新增媒体", status: "active" });

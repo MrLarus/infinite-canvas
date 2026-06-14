@@ -16,6 +16,7 @@ import { formatBytes, formatDuration } from "@/lib/image-utils";
 import { boolConfig, isSeedanceVideoConfig, normalizeSeedanceRatio, seedanceReferenceLabel, seedanceVideoReferenceError, seedanceVideoReferenceHint, SEEDANCE_REFERENCE_LIMITS } from "@/lib/seedance-video";
 import { deleteStoredMedia, resolveMediaUrl, uploadMediaFile } from "@/services/file-storage";
 import { resolveImageUrl, uploadImage } from "@/services/image-storage";
+import { markAppDataDirty } from "@/services/app-sync-events";
 import { createVideoGenerationTask, pollVideoGenerationTask, storeGeneratedVideo, type VideoGenerationTask } from "@/services/api/video";
 import { useAssetStore } from "@/stores/use-asset-store";
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -265,11 +266,13 @@ export default function VideoPage() {
         }
         setSelectedLogIds([]);
         setDeleteConfirmOpen(false);
+        markAppDataDirty("video-workbench");
     };
 
     const saveLog = async (log: GenerationLog) => {
         await logStore.setItem(log.id, serializeLog(log));
         await refreshLogs();
+        markAppDataDirty("video-workbench");
     };
 
     const refreshLogs = async () => {

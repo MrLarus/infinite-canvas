@@ -12,6 +12,7 @@ import { PromptSelectDialog } from "@/components/prompts/prompt-select-dialog";
 import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/components/asset-picker-modal";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
+import { markAppDataDirty } from "@/services/app-sync-events";
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
@@ -248,10 +249,14 @@ export default function ImagePage() {
         }
         setSelectedLogIds([]);
         setDeleteConfirmOpen(false);
+        markAppDataDirty("image-workbench");
     };
 
     const saveLog = (log: GenerationLog) => {
-        void logStore.setItem(log.id, serializeLog(log)).then(refreshLogs);
+        void logStore.setItem(log.id, serializeLog(log)).then(async () => {
+            await refreshLogs();
+            markAppDataDirty("image-workbench");
+        });
     };
 
     const refreshLogs = async () => setLogs(await readStoredLogs());

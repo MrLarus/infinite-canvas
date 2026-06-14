@@ -37,12 +37,16 @@ export type AiConfig = {
 };
 
 export type WebdavSyncConfig = {
+    autoSyncEnabled: boolean;
     proxyMode: "direct" | "nextjs";
     url: string;
     username: string;
     password: string;
     directory: string;
+    configuredAt: string;
     lastSyncedAt: string;
+    lastAutoSyncedAt: string;
+    lastAutoSyncError: string;
 };
 
 export const CONFIG_STORE_KEY = "infinite-canvas:ai_config_store";
@@ -78,15 +82,19 @@ export const defaultConfig: AiConfig = {
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
+    autoSyncEnabled: true,
     proxyMode: "nextjs",
     url: "https://dav.stsh.top/dav",
     username: "",
     password: "",
     directory: "default",
+    configuredAt: "",
     lastSyncedAt: "",
+    lastAutoSyncedAt: "",
+    lastAutoSyncError: "",
 };
 
-const WEBDAV_TRIM_KEYS = new Set<keyof WebdavSyncConfig>(["url", "username", "password", "directory"]);
+const WEBDAV_TRIM_KEYS = new Set<keyof WebdavSyncConfig>(["url", "username", "password", "directory", "configuredAt", "lastSyncedAt", "lastAutoSyncedAt", "lastAutoSyncError"]);
 const WEBDAV_EDGE_INVISIBLE_PATTERN = /^[\s\uFEFF\xA0\u180E\u200B-\u200D\u2060]+|[\s\uFEFF\xA0\u180E\u200B-\u200D\u2060]+$/g;
 
 type ConfigStore = {
@@ -98,6 +106,7 @@ type ConfigStore = {
     shouldPromptContinue: boolean;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     updateWebdavConfig: <K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) => void;
+    patchWebdavConfig: (patch: Partial<WebdavSyncConfig>) => void;
     loadPublicSettings: () => Promise<void>;
     isAiConfigReady: (config: AiConfig, model: string) => boolean;
     openConfigDialog: (shouldPromptContinue?: boolean) => void;
@@ -225,6 +234,13 @@ export const useConfigStore = create<ConfigStore>()(
                         [key]: normalizeWebdavValue(key, value),
                     },
                 })),
+            patchWebdavConfig: (patch) =>
+                set((state) => ({
+                    webdav: normalizeWebdavConfig({
+                        ...state.webdav,
+                        ...patch,
+                    }),
+                })),
             loadPublicSettings: async () => {
                 if (get().isPublicSettingsLoading) return;
                 set({ isPublicSettingsLoading: true });
@@ -286,13 +302,34 @@ export function normalizeWebdavConfig(config: WebdavSyncConfig | Partial<WebdavS
     return {
         ...defaultWebdavSyncConfig,
         ...config,
+        autoSyncEnabled: config.autoSyncEnabled !== false,
         proxyMode,
         url: normalizeWebdavText(config.url),
         username: normalizeWebdavText(config.username),
         password: normalizeWebdavPassword(config.password),
         directory: normalizeWebdavPath(config.directory),
+        configuredAt: normalizeWebdavText(config.configuredAt),
         lastSyncedAt: normalizeWebdavText(config.lastSyncedAt),
+        lastAutoSyncedAt: normalizeWebdavText(config.lastAutoSyncedAt),
+        lastAutoSyncError: normalizeWebdavText(config.lastAutoSyncError),
     };
+}
+
+export function isWebdavAutoSyncRunnable(config: WebdavSyncConfig | Partial<WebdavSyncConfig>) {
+    const webdav = normalizeWebdavConfig(config);
+    return Boolean(webdav.autoSyncEnabled && webdav.url && (webdav.configuredAt || webdav.lastSyncedAt || webdav.username || webdav.password));
+}
+
+export function webdavAutoSyncSignature(config: WebdavSyncConfig | Partial<WebdavSyncConfig>) {
+    const webdav = normalizeWebdavConfig(config);
+    return JSON.stringify({
+        autoSyncEnabled: webdav.autoSyncEnabled,
+        proxyMode: webdav.proxyMode,
+        url: webdav.url,
+        username: webdav.username,
+        password: webdav.password,
+        directory: webdav.directory,
+    });
 }
 
 export function normalizeWebdavValue<K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) {

@@ -5,6 +5,7 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 
 import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
+import { isAppDataDirtySignalSuppressed, markAppDataDirty } from "@/services/app-sync-events";
 import { cleanupUnusedImages, resolveImageUrl, uploadImage } from "@/services/image-storage";
 import { cleanupUnusedMedia, resolveMediaUrl } from "@/services/file-storage";
 
@@ -74,19 +75,24 @@ export const useAssetStore = create<AssetStore>()(
                 const now = new Date().toISOString();
                 const id = nanoid();
                 set((state) => ({ assets: [{ ...asset, id, createdAt: now, updatedAt: now } as Asset, ...state.assets] }));
+                markAssetDirty();
                 return id;
             },
             updateAsset: (id, patch) =>
-                set((state) => ({
-                    assets: state.assets.map((asset) => (asset.id === id ? ({ ...asset, ...patch, updatedAt: new Date().toISOString() } as Asset) : asset)),
-                })),
+                markAssetDirtyAfterSet(() =>
+                    set((state) => ({
+                        assets: state.assets.map((asset) => (asset.id === id ? ({ ...asset, ...patch, updatedAt: new Date().toISOString() } as Asset) : asset)),
+                    })),
+                ),
             removeAsset: (id) =>
-                set((state) => {
-                    const assets = state.assets.filter((asset) => asset.id !== id);
-                    get().cleanupImages({ assets });
-                    return { assets };
-                }),
-            replaceAssets: (assets) => set({ assets }),
+                markAssetDirtyAfterSet(() =>
+                    set((state) => {
+                        const assets = state.assets.filter((asset) => asset.id !== id);
+                        get().cleanupImages({ assets });
+                        return { assets };
+                    }),
+                ),
+            replaceAssets: (assets) => markAssetDirtyAfterSet(() => set({ assets })),
             cleanupImages: (extra) => {
                 window.setTimeout(async () => {
                     const { useCanvasStore } = await import("@/app/(user)/canvas/stores/use-canvas-store");
@@ -105,3 +111,12 @@ export const useAssetStore = create<AssetStore>()(
         },
     ),
 );
+
+function markAssetDirtyAfterSet(action: () => void) {
+    action();
+    markAssetDirty();
+}
+
+function markAssetDirty() {
+    if (!isAppDataDirtySignalSuppressed()) markAppDataDirty("assets");
+}

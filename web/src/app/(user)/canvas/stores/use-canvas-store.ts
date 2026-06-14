@@ -3,6 +3,7 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 
 import { nanoid } from "nanoid";
 import { localForageStorage } from "@/lib/localforage-storage";
+import { isAppDataDirtySignalSuppressed, markAppDataDirty } from "@/services/app-sync-events";
 import type { CanvasBackgroundMode } from "@/lib/canvas-theme";
 import type { CanvasAssistantSession, CanvasConnection, CanvasNodeData, ViewportTransform } from "../types";
 
@@ -81,6 +82,7 @@ export const useCanvasStore = create<CanvasStore>()(
                     viewport: initialViewport,
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
+                markCanvasDirty();
                 return id;
             },
             importProject: (source) => {
@@ -99,25 +101,32 @@ export const useCanvasStore = create<CanvasStore>()(
                     viewport: source.viewport || initialViewport,
                 };
                 set((state) => ({ projects: [project, ...state.projects] }));
+                markCanvasDirty();
                 return project.id;
             },
             openProject: (id) => {
                 return get().projects.find((item) => item.id === id) || null;
             },
             renameProject: (id, title) =>
-                set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, title: title.trim() || project.title, updatedAt: new Date().toISOString() } : project)),
-                })),
+                markCanvasDirtyAfterSet(() =>
+                    set((state) => ({
+                        projects: state.projects.map((project) => (project.id === id ? { ...project, title: title.trim() || project.title, updatedAt: new Date().toISOString() } : project)),
+                    })),
+                ),
             deleteProjects: (ids) =>
-                set((state) => {
-                    const projects = state.projects.filter((project) => !ids.includes(project.id));
-                    return { projects };
-                }),
-            replaceProjects: (projects) => set({ projects }),
+                markCanvasDirtyAfterSet(() =>
+                    set((state) => {
+                        const projects = state.projects.filter((project) => !ids.includes(project.id));
+                        return { projects };
+                    }),
+                ),
+            replaceProjects: (projects) => markCanvasDirtyAfterSet(() => set({ projects })),
             updateProject: (id, patch) =>
-                set((state) => ({
-                    projects: state.projects.map((project) => (project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)),
-                })),
+                markCanvasDirtyAfterSet(() =>
+                    set((state) => ({
+                        projects: state.projects.map((project) => (project.id === id ? { ...project, ...patch, updatedAt: new Date().toISOString() } : project)),
+                    })),
+                ),
         }),
         {
             name: CANVAS_STORE_KEY,
@@ -132,3 +141,12 @@ export const useCanvasStore = create<CanvasStore>()(
         },
     ),
 );
+
+function markCanvasDirtyAfterSet(action: () => void) {
+    action();
+    markCanvasDirty();
+}
+
+function markCanvasDirty() {
+    if (!isAppDataDirtySignalSuppressed()) markAppDataDirty("canvas");
+}
