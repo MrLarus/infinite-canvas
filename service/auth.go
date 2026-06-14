@@ -563,6 +563,9 @@ func safeRedirectPath(redirect string) string {
 }
 
 func RequestOrigin(r *http.Request) string {
+	if publicBaseURL := strings.TrimRight(strings.TrimSpace(config.Cfg.PublicBaseURL), "/"); publicBaseURL != "" {
+		return publicBaseURL
+	}
 	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
 	if host == "" {
 		host = r.Host
