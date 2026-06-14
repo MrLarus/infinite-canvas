@@ -9,7 +9,7 @@ import { useUserStore } from "@/stores/use-user-store";
 import type { ReferenceImage } from "@/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/types/media";
 
-type VideoResponse = { id: string; status?: string; error?: { message?: string } };
+type VideoResponse = { id: string; status?: string; object?: string; url?: string; video_url?: string; error?: { message?: string }; content?: { url?: string; image_url?: string; video_url?: string } | null };
 type ApiVideoResponse = VideoResponse | { code?: number; data?: VideoResponse | null; msg?: string };
 type SeedanceTask = {
     id: string;
@@ -20,7 +20,7 @@ type SeedanceTask = {
 type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
 type ReferenceMediaUploadResponse = { id: string; url: string; mimeType: string; bytes: number };
 
-export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string };
+export type VideoGenerationResult = { kind?: "video"; blob?: Blob; url?: string; mimeType?: string } | { kind: "image"; url: string; mimeType?: string };
 export type VideoGenerationTask = { id: string; provider: "openai" | "seedance"; model: string };
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
@@ -76,6 +76,7 @@ export async function pollVideoGenerationTask(config: AiConfig, task: VideoGener
 }
 
 export async function storeGeneratedVideo(result: VideoGenerationResult): Promise<UploadedFile> {
+    if (result.kind === "image") throw new Error("该模型返回的是图片，请在图片模式中生成");
     if (result.blob) return uploadMediaFile(result.blob, "video");
     if (result.url) return { url: result.url, storageKey: "", bytes: 0, mimeType: result.mimeType || "video/mp4" };
     throw new Error("视频接口没有返回可播放的视频");
@@ -104,10 +105,21 @@ async function pollOpenAIVideoTask(config: AiConfig, task: VideoGenerationTask):
     try {
         const video = unwrapVideoResponse((await axios.get<ApiVideoResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined })).data);
         if (video.status === "completed") {
-            const content = await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined, responseType: "blob" });
-            await assertVideoBlob(content.data);
-            refreshRemoteUser(config);
-            return { status: "completed", result: { blob: content.data } };
+            const outputUrl = video.url || video.video_url || video.content?.url || video.content?.image_url || video.content?.video_url || "";
+            if (outputUrl && isImageVideoResult(video, outputUrl)) {
+                refreshRemoteUser(config);
+                return { status: "completed", result: { kind: "image", url: outputUrl, mimeType: imageMimeTypeFromUrl(outputUrl) } };
+            }
+            try {
+                const content = (await axios.get<Blob>(aiApiUrl(config, `/videos/${task.id}/content`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined, responseType: "blob" })).data;
+                await assertVideoBlob(content);
+                refreshRemoteUser(config);
+                return { status: "completed", result: { kind: "video", blob: content } };
+            } catch (error) {
+                if (!outputUrl) throw error;
+                refreshRemoteUser(config);
+                return { status: "completed", result: await videoResultFromUrl(outputUrl) };
+            }
         }
         if (video.status === "failed" || video.status === "cancelled") return { status: "failed", error: video.error?.message || "视频生成失败" };
         return { status: "pending" };
@@ -247,10 +259,13 @@ async function uploadReferenceMedia(file: File) {
 async function videoResultFromUrl(url: string): Promise<VideoGenerationResult> {
     try {
         const response = await axios.get<Blob>(url, { responseType: "blob" });
+        if (response.data.type.startsWith("image/") || isImageUrl(url)) {
+            return { kind: "image", url, mimeType: response.data.type || imageMimeTypeFromUrl(url) };
+        }
         await assertVideoBlob(response.data);
-        return { blob: response.data };
+        return { kind: "video", blob: response.data };
     } catch {
-        return { url, mimeType: "video/mp4" };
+        return isImageUrl(url) ? { kind: "image", url, mimeType: imageMimeTypeFromUrl(url) } : { kind: "video", url, mimeType: "video/mp4" };
     }
 }
 
@@ -309,6 +324,31 @@ function statusMessage(status: number | undefined, fallback: string) {
     if (status === 401 || status === 403) return "鉴权失败，请检查 API Key、套餐权限或模型权限";
     if (status === 429) return "请求被限流或额度不足，请稍后重试";
     return status ? `${fallback}（${status}）` : fallback;
+}
+
+function isImageVideoResult(video: VideoResponse, url: string) {
+    return video.object?.toLowerCase().includes("image") || isImageUrl(url);
+}
+
+function isImageUrl(url: string) {
+    if (/^data:image\//i.test(url)) return true;
+    return /\.(png|jpe?g|webp|gif|bmp|avif)(?:[?#]|$)/i.test(readUrlPath(url));
+}
+
+function imageMimeTypeFromUrl(url: string) {
+    if (/^data:image\/jpe?g/i.test(url) || /\.jpe?g(?:[?#]|$)/i.test(readUrlPath(url))) return "image/jpeg";
+    if (/^data:image\/webp/i.test(url) || /\.webp(?:[?#]|$)/i.test(readUrlPath(url))) return "image/webp";
+    if (/^data:image\/gif/i.test(url) || /\.gif(?:[?#]|$)/i.test(readUrlPath(url))) return "image/gif";
+    if (/^data:image\/avif/i.test(url) || /\.avif(?:[?#]|$)/i.test(readUrlPath(url))) return "image/avif";
+    return "image/png";
+}
+
+function readUrlPath(url: string) {
+    try {
+        return new URL(url).pathname;
+    } catch {
+        return url;
+    }
 }
 
 async function assertVideoBlob(blob: Blob) {

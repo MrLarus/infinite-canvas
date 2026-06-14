@@ -19,6 +19,17 @@ type ImageApiResponse = {
     code?: number;
     msg?: string;
 };
+type AsyncImageTask = {
+    id?: string;
+    task_id?: string;
+    status?: string;
+    object?: string;
+    url?: string;
+    video_url?: string;
+    error?: { message?: string };
+    content?: { url?: string; image_url?: string; video_url?: string } | null;
+};
+type AsyncImageTaskResponse = AsyncImageTask | { code?: number; data?: AsyncImageTask | null; msg?: string };
 
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
@@ -198,6 +209,16 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
+    if (isAsyncVideoImageModel(config.model)) {
+        try {
+            const tasks = await Promise.all(Array.from({ length: n }, () => requestAsyncImageTask(config, withSystemPrompt(config, prompt), quality, requestSize)));
+            const images = await Promise.all(tasks.map((task) => pollAsyncImageTask(config, task)));
+            refreshRemoteUser(config);
+            return images.map((dataUrl) => ({ id: nanoid(), dataUrl }));
+        } catch (error) {
+            throw new Error(readAxiosError(error, "请求失败"));
+        }
+    }
     try {
         const response = await axios.post<ImageApiResponse>(
             aiApiUrl(config, "/images/generations"),
@@ -220,6 +241,82 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
     } catch (error) {
         throw new Error(readAxiosError(error, "请求失败"));
     }
+}
+
+async function requestAsyncImageTask(config: AiConfig, prompt: string, quality: string | undefined, size: string | undefined) {
+    const response = await axios.post<AsyncImageTaskResponse>(
+        aiApiUrl(config, "/videos"),
+        {
+            model: config.model,
+            prompt,
+            n: 1,
+            ...(quality ? { quality } : {}),
+            ...(size ? { size } : {}),
+            response_format: "url",
+            output_format: IMAGE_OUTPUT_FORMAT,
+        },
+        { headers: aiHeaders(config, "application/json") },
+    );
+    const task = unwrapAsyncImageTask(response.data);
+    const id = task.id || task.task_id;
+    if (!id) throw new Error("图片任务接口没有返回任务 ID");
+    return { id, model: config.model };
+}
+
+async function pollAsyncImageTask(config: AiConfig, task: { id: string; model: string }) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+        const response = await axios.get<AsyncImageTaskResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined });
+        const state = unwrapAsyncImageTask(response.data);
+        const status = state.status?.toLowerCase();
+        if (status === "completed" || status === "succeeded") {
+            const url = state.url || state.video_url || state.content?.url || state.content?.image_url || state.content?.video_url;
+            if (!url) throw new Error("图片任务成功但没有返回图片 URL");
+            if (!isImageTaskResult(state, url)) throw new Error("图片任务返回的不是图片 URL");
+            return url;
+        }
+        if (status === "failed" || status === "cancelled" || status === "expired") {
+            throw new Error(state.error?.message || "图片生成失败");
+        }
+        if (attempt === 119) throw new Error("图片生成超时，请稍后重试");
+        await delay(2500);
+    }
+    throw new Error("图片生成超时，请稍后重试");
+}
+
+function unwrapAsyncImageTask(payload: AsyncImageTaskResponse) {
+    if (!payload) throw new Error("接口没有返回图片任务");
+    if (typeof payload === "object" && "code" in payload && typeof payload.code === "number") {
+        if (payload.code !== 0) throw new Error(payload.msg || "请求失败");
+        if (!payload.data) throw new Error("接口没有返回图片任务");
+        return payload.data;
+    }
+    return payload as AsyncImageTask;
+}
+
+function isAsyncVideoImageModel(model: string) {
+    const value = model.trim().toLowerCase();
+    return value === "gpt-image-2" || value.startsWith("gpt-image-2-") || value === "nano_banana_2" || value.startsWith("nano_banana_pro");
+}
+
+function isImageTaskResult(task: AsyncImageTask, url: string) {
+    return task.object?.toLowerCase().includes("image") || isImageUrl(url);
+}
+
+function isImageUrl(url: string) {
+    if (/^data:image\//i.test(url)) return true;
+    return /\.(png|jpe?g|webp|gif|bmp|avif)(?:[?#]|$)/i.test(readUrlPath(url));
+}
+
+function readUrlPath(url: string) {
+    try {
+        return new URL(url).pathname;
+    } catch {
+        return url;
+    }
+}
+
+function delay(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage) {
