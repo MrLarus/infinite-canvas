@@ -77,7 +77,17 @@ export function AppConfigModal() {
     const normalizedWebdav = normalizeWebdavConfig(webdav);
     const webdavReady = Boolean(normalizedWebdav.url);
 
+    const persistNormalizedWebdav = () => {
+        updateWebdavConfig("proxyMode", normalizedWebdav.proxyMode);
+        updateWebdavConfig("url", normalizedWebdav.url);
+        updateWebdavConfig("directory", normalizedWebdav.directory);
+        updateWebdavConfig("username", normalizedWebdav.username);
+        updateWebdavConfig("password", normalizedWebdav.password);
+        return normalizedWebdav;
+    };
+
     const finishConfig = () => {
+        persistNormalizedWebdav();
         setConfigDialogOpen(false);
         if (effectiveMode === "local" && (!config.baseUrl.trim() || !config.apiKey.trim())) return;
         if (!modelConfig.imageModel.trim() || !modelConfig.videoModel.trim() || !modelConfig.textModel.trim()) return;
@@ -133,7 +143,8 @@ export function AppConfigModal() {
         }
         setTestingWebdav(true);
         try {
-            await testWebdavConnection(normalizedWebdav);
+            const config = persistNormalizedWebdav();
+            await testWebdavConnection(config);
             message.success("WebDAV 连接可用");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "WebDAV 连接测试失败");
@@ -166,7 +177,8 @@ export function AppConfigModal() {
         setWebdavDomainProgress(createWebdavDomainProgress());
         setWebdavSyncStatus("准备同步");
         try {
-            const result = await syncAppDataToWebdav(normalizedWebdav, updateWebdavProgress);
+            const config = persistNormalizedWebdav();
+            const result = await syncAppDataToWebdav(config, updateWebdavProgress);
             updateWebdavConfig("lastSyncedAt", result.syncedAt);
             message.success(`同步完成：${result.projects} 个画布，${result.assets} 个素材，${result.imageLogs + result.videoLogs} 条记录，本次上传 ${result.uploadedFiles} 个文件 ${formatBytes(result.uploadedBytes)}`);
         } catch (error) {

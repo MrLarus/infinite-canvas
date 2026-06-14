@@ -78,11 +78,11 @@ export const defaultConfig: AiConfig = {
 };
 
 export const defaultWebdavSyncConfig: WebdavSyncConfig = {
-    proxyMode: "direct",
-    url: "",
+    proxyMode: "nextjs",
+    url: "https://dav.stsh.top/dav",
     username: "",
     password: "",
-    directory: "infinite-canvas",
+    directory: "default",
     lastSyncedAt: "",
 };
 
