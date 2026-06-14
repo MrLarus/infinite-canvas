@@ -9,7 +9,7 @@ import { fetchImageModels } from "@/services/api/image";
 import { syncAppDataToWebdav, type AppSyncDomainKey, type AppSyncProgressEvent } from "@/services/app-sync";
 import { testWebdavConnection, WEBDAV_MANIFEST_FILE_NAME } from "@/services/webdav-sync";
 import { audioFormatOptions, audioVoiceOptions, normalizeAudioSpeedValue } from "@/lib/audio-generation";
-import { filterModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
+import { filterModelsByCapability, normalizeWebdavConfig, useConfigStore, useEffectiveConfig, type AiConfig, type ModelCapability } from "@/stores/use-config-store";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -74,7 +74,8 @@ export function AppConfigModal() {
     const effectiveMode = allowCustomChannel ? config.channelMode : "remote";
     const modelConfig = effectiveMode === "remote" ? effectiveConfig : config;
     const modelOptions = config.models.map((model) => ({ label: model, value: model }));
-    const webdavReady = Boolean(webdav.url.trim());
+    const normalizedWebdav = normalizeWebdavConfig(webdav);
+    const webdavReady = Boolean(normalizedWebdav.url);
 
     const finishConfig = () => {
         setConfigDialogOpen(false);
@@ -132,7 +133,7 @@ export function AppConfigModal() {
         }
         setTestingWebdav(true);
         try {
-            await testWebdavConnection(webdav);
+            await testWebdavConnection(normalizedWebdav);
             message.success("WebDAV 连接可用");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "WebDAV 连接测试失败");
@@ -165,7 +166,7 @@ export function AppConfigModal() {
         setWebdavDomainProgress(createWebdavDomainProgress());
         setWebdavSyncStatus("准备同步");
         try {
-            const result = await syncAppDataToWebdav(webdav, updateWebdavProgress);
+            const result = await syncAppDataToWebdav(normalizedWebdav, updateWebdavProgress);
             updateWebdavConfig("lastSyncedAt", result.syncedAt);
             message.success(`同步完成：${result.projects} 个画布，${result.assets} 个素材，${result.imageLogs + result.videoLogs} 条记录，本次上传 ${result.uploadedFiles} 个文件 ${formatBytes(result.uploadedBytes)}`);
         } catch (error) {
@@ -329,16 +330,16 @@ export function AppConfigModal() {
                                 />
                             </Form.Item>
                             <Form.Item label="WebDAV 地址" className="mb-4">
-                                <Input value={webdav.url} placeholder="https://nas.example.com/webdav" onChange={(event) => updateWebdavConfig("url", event.target.value)} />
+                                <Input value={webdav.url} placeholder="https://nas.example.com/webdav" autoComplete="off" onChange={(event) => updateWebdavConfig("url", event.target.value)} />
                             </Form.Item>
                             <Form.Item label="远程目录" extra={`会在该目录下分业务目录保存，每个目录包含 ${WEBDAV_MANIFEST_FILE_NAME} 和 files/`} className="mb-4">
-                                <Input value={webdav.directory} placeholder="infinite-canvas" onChange={(event) => updateWebdavConfig("directory", event.target.value)} />
+                                <Input value={webdav.directory} placeholder="infinite-canvas" autoComplete="off" onChange={(event) => updateWebdavConfig("directory", event.target.value)} />
                             </Form.Item>
                             <Form.Item label="用户名" className="mb-0">
-                                <Input value={webdav.username} autoComplete="username" onChange={(event) => updateWebdavConfig("username", event.target.value)} />
+                                <Input value={webdav.username} autoComplete="off" data-lpignore="true" onChange={(event) => updateWebdavConfig("username", event.target.value)} />
                             </Form.Item>
                             <Form.Item label="密码 / 应用密码" className="mb-0">
-                                <Input.Password value={webdav.password} autoComplete="current-password" onChange={(event) => updateWebdavConfig("password", event.target.value)} />
+                                <Input.Password value={webdav.password} autoComplete="new-password" data-lpignore="true" onChange={(event) => updateWebdavConfig("password", event.target.value)} />
                             </Form.Item>
                         </div>
                         <div className="mt-4 flex flex-wrap items-center gap-2">

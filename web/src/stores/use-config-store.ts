@@ -86,6 +86,9 @@ export const defaultWebdavSyncConfig: WebdavSyncConfig = {
     lastSyncedAt: "",
 };
 
+const WEBDAV_TRIM_KEYS = new Set<keyof WebdavSyncConfig>(["url", "username", "password", "directory"]);
+const WEBDAV_EDGE_INVISIBLE_PATTERN = /^[\s\uFEFF\xA0\u180E\u200B-\u200D\u2060]+|[\s\uFEFF\xA0\u180E\u200B-\u200D\u2060]+$/g;
+
 type ConfigStore = {
     config: AiConfig;
     webdav: WebdavSyncConfig;
@@ -219,7 +222,7 @@ export const useConfigStore = create<ConfigStore>()(
                 set((state) => ({
                     webdav: {
                         ...state.webdav,
-                        [key]: value,
+                        [key]: normalizeWebdavValue(key, value),
                     },
                 })),
             loadPublicSettings: async () => {
@@ -246,7 +249,7 @@ export const useConfigStore = create<ConfigStore>()(
                 const config = { ...defaultConfig, ...persistedConfig };
                 return {
                     ...current,
-                    webdav: { ...defaultWebdavSyncConfig, ...persistedWebdav },
+                    webdav: normalizeWebdavConfig({ ...defaultWebdavSyncConfig, ...persistedWebdav }),
                     config: {
                         ...config,
                         channelMode: config.channelMode || "remote",
@@ -276,6 +279,40 @@ export const useConfigStore = create<ConfigStore>()(
 
 function normalizeModelList(models: string[]) {
     return Array.from(new Set((models || []).map((model) => model.trim()).filter(Boolean)));
+}
+
+export function normalizeWebdavConfig(config: WebdavSyncConfig | Partial<WebdavSyncConfig>): WebdavSyncConfig {
+    const proxyMode: WebdavSyncConfig["proxyMode"] = config.proxyMode === "nextjs" ? "nextjs" : "direct";
+    return {
+        ...defaultWebdavSyncConfig,
+        ...config,
+        proxyMode,
+        url: normalizeWebdavText(config.url),
+        username: normalizeWebdavText(config.username),
+        password: normalizeWebdavPassword(config.password),
+        directory: normalizeWebdavPath(config.directory),
+        lastSyncedAt: normalizeWebdavText(config.lastSyncedAt),
+    };
+}
+
+export function normalizeWebdavValue<K extends keyof WebdavSyncConfig>(key: K, value: WebdavSyncConfig[K]) {
+    if (!WEBDAV_TRIM_KEYS.has(key)) return value;
+    if (typeof value !== "string") return value;
+    if (key === "directory") return normalizeWebdavPath(value) as WebdavSyncConfig[K];
+    if (key === "password") return normalizeWebdavPassword(value) as WebdavSyncConfig[K];
+    return normalizeWebdavText(value) as WebdavSyncConfig[K];
+}
+
+function normalizeWebdavText(value: unknown) {
+    return typeof value === "string" ? value.replace(WEBDAV_EDGE_INVISIBLE_PATTERN, "") : "";
+}
+
+function normalizeWebdavPassword(value: unknown) {
+    return normalizeWebdavText(value);
+}
+
+function normalizeWebdavPath(value: unknown) {
+    return normalizeWebdavText(value).replace(/^\/+|\/+$/g, "");
 }
 
 export function useEffectiveConfig() {

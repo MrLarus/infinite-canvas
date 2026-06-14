@@ -1,5 +1,6 @@
 "use client";
 
+import { normalizeWebdavConfig } from "@/stores/use-config-store";
 import type { WebdavSyncConfig } from "@/stores/use-config-store";
 
 export const WEBDAV_MANIFEST_FILE_NAME = "manifest.json";
@@ -73,13 +74,16 @@ async function webdavDirectoryExists(config: WebdavSyncConfig, path: string) {
 }
 
 async function webdavFetch(config: WebdavSyncConfig, path: string, init: RequestInit) {
+    const normalizedConfig = normalizeWebdavConfig(config);
     const headers = new Headers(init.headers);
-    if (config.username || config.password) headers.set("Authorization", `Basic ${encodeBasicAuth(`${config.username}:${config.password}`)}`);
+    if (normalizedConfig.username || normalizedConfig.password) {
+        headers.set("Authorization", `Basic ${encodeBasicAuth(`${normalizedConfig.username}:${normalizedConfig.password}`)}`);
+    }
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), WEBDAV_REQUEST_TIMEOUT_MS);
     try {
-        const url = buildWebdavUrl(config, path);
-        if (config.proxyMode === "nextjs") return await fetch("/webdav-proxy", { method: "POST", headers: proxyHeaders(url, init.method || "GET", headers), body: proxyBody(init), signal: controller.signal });
+        const url = buildWebdavUrl(normalizedConfig, path);
+        if (normalizedConfig.proxyMode === "nextjs") return await fetch("/webdav-proxy", { method: "POST", headers: proxyHeaders(url, init.method || "GET", headers), body: proxyBody(init), signal: controller.signal });
         return await fetch(url, { ...init, headers, signal: controller.signal });
     } catch (error) {
         if (error instanceof Error && error.name === "AbortError") throw new Error("WebDAV 请求超时，请检查网络、代理或远端服务状态");
@@ -117,8 +121,9 @@ function proxyBody(init: RequestInit) {
 }
 
 function buildWebdavUrl(config: WebdavSyncConfig, path: string) {
-    const baseUrl = config.url.trim().replace(/\/+$/, "");
-    const remotePath = [normalizePath(config.directory), normalizePath(path)].filter(Boolean).join("/");
+    const normalizedConfig = normalizeWebdavConfig(config);
+    const baseUrl = normalizedConfig.url.replace(/\/+$/, "");
+    const remotePath = [normalizePath(normalizedConfig.directory), normalizePath(path)].filter(Boolean).join("/");
     if (!remotePath) return baseUrl;
     return `${baseUrl}/${remotePath.split("/").map(encodeURIComponent).join("/")}`;
 }
