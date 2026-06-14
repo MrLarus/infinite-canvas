@@ -36,3 +36,19 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha,scope=fork-amd64
           cache-to: type=gha,mode=max,scope=fork-amd64
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          tags: ${{ env.IMAGE_NAME }}:otuapi-async-image
+          outputs: type=docker,dest=/tmp/infinite-canvas.tar
+          cache-from: type=gha,scope=fork-amd64
+
+      - run: gzip -9 /tmp/infinite-canvas.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: infinite-canvas-image-amd64
+          path: /tmp/infinite-canvas.tar.gz
+          retention-days: 1
