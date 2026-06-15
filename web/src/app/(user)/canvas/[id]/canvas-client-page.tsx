@@ -306,6 +306,7 @@ function InfiniteCanvasPage() {
     const connectionsRef = useRef(connections);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
     const viewportRef = useRef(viewport);
+    const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
     const selectionBoxRef = useRef(selectionBox);
@@ -660,7 +661,8 @@ function InfiniteCanvasPage() {
     const applyAgentOps = useCallback(
         (ops: CanvasAgentOp[]) => {
             const before = { projectId, title: currentProject?.title || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current };
-            const next = applyCanvasAgentOps(before, ops);
+            const generationOps = ops.filter((op): op is Extract<CanvasAgentOp, { type: "run_generation" }> => op.type === "run_generation");
+            const next = applyCanvasAgentOps(before, ops.filter((op) => op.type !== "run_generation"));
             nodesRef.current = next.nodes;
             connectionsRef.current = next.connections;
             selectedNodeIdsRef.current = new Set(next.selectedNodeIds);
@@ -672,6 +674,9 @@ function InfiniteCanvasPage() {
             setSelectedConnectionId(null);
             setViewport(next.viewport);
             setContextMenu(null);
+            if (generationOps.length) {
+                queueMicrotask(() => generationOps.forEach((op) => void generateNodeRef.current?.(op.nodeId, op.mode || "image", op.prompt || "")));
+            }
             return { ...next, projectId, title: currentProject?.title || "未命名画布" };
         },
         [currentProject?.title, projectId],
@@ -2145,6 +2150,9 @@ function InfiniteCanvasPage() {
         },
         [effectiveConfig, openConfigDialog],
     );
+    useEffect(() => {
+        generateNodeRef.current = handleGenerateNode;
+    }, [handleGenerateNode]);
 
     const handleRetryNode = useCallback(
         async (node: CanvasNodeData) => {

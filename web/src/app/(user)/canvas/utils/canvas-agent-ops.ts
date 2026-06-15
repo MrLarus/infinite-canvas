@@ -9,7 +9,8 @@ export type CanvasAgentOp =
     | { type: "delete_node"; id?: string; ids?: string[] }
     | { type: "connect_nodes"; id?: string; fromNodeId: string; toNodeId: string }
     | { type: "set_viewport"; viewport: ViewportTransform }
-    | { type: "select_nodes"; ids: string[] };
+    | { type: "select_nodes"; ids: string[] }
+    | { type: "run_generation"; nodeId: string; mode?: "text" | "image" | "video" | "audio"; prompt?: string };
 
 export type CanvasAgentSnapshot = {
     projectId: string;
@@ -80,5 +81,6 @@ function opLabel(type: string) {
     if (type === "connect_nodes") return "连接";
     if (type === "set_viewport") return "调整视图";
     if (type === "select_nodes") return "选择节点";
+    if (type === "run_generation") return "触发生成";
     return type;
 }

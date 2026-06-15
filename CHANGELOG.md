@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-+ [新增] 新增canvas-agent通过codex/claude code操作画布。
+## v0.3.0 - 2026-06-15
+
++ [新增] 新增canvas-agent通过codex操作画布。
 
 ## v0.2.5 - 2026-06-08
 

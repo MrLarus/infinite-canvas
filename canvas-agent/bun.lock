@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "canvas-agent",
+      "name": "@basketikun/canvas-agent",
       "dependencies": {
         "@modelcontextprotocol/sdk": "^1.12.1",
         "@openai/codex": "^0.139.0",
@@ -84,8 +84,6 @@
     "@openai/codex-linux-arm64": ["@openai/codex@0.139.0-linux-arm64", "https://registry.npmmirror.com/@openai/codex/-/codex-0.139.0-linux-arm64.tgz", { "os": "linux", "cpu": "arm64" }, "sha512-tBQE5lZciRHeWZGuURgjP9S717MvTIpQMc593+DNxY2LQxozkngOkzFSQd1+/UmQKGrCqdFLu5irIwPXpSZyEw=="],
 
     "@openai/codex-linux-x64": ["@openai/codex@0.139.0-linux-x64", "https://registry.npmmirror.com/@openai/codex/-/codex-0.139.0-linux-x64.tgz", { "os": "linux", "cpu": "x64" }, "sha512-14UgzDS+X4crkvdt6S02A/ZZOrS8ZyWiuTRpguCtnhNamb7unSuDxy86BWgpAl3sqiTaN2CP8VLyp2ohQ8Nbzw=="],
-
-    "@openai/codex-sdk": ["@openai/codex-sdk@0.139.0", "https://registry.npmmirror.com/@openai/codex-sdk/-/codex-sdk-0.139.0.tgz", { "dependencies": { "@openai/codex": "0.139.0" } }, "sha512-r4lDckaVx4mVZy1v/7ykEhkeWjVfM/4oGJfhG0AP4+zN3Sa+jcf5hdY4EHfJasofBcp0tIF/7JCKHpv534R+tw=="],
 
     "@openai/codex-win32-arm64": ["@openai/codex@0.139.0-win32-arm64", "https://registry.npmmirror.com/@openai/codex/-/codex-0.139.0-win32-arm64.tgz", { "os": "win32", "cpu": "arm64" }, "sha512-nlwRjsYotH1Rtqu/Q0VwQbIeO2UX1mkHK84Ov9qn/hl29QqqoBtno0tRyqIPbkXFIVQuWiAYXlV3ugLwH5fTrQ=="],
 

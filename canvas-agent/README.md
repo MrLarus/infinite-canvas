@@ -5,7 +5,7 @@
 ## 启动
 
 ```bash
-npx -y canvas-agent
+npx -y @basketikun/canvas-agent
 ```
 
 本仓库开发时也可以直接运行：
@@ -28,6 +28,12 @@ Connect token: xxxxxx
 
 Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接后，Canvas Agent 会记录该网页 Origin；之后其他 Origin 不能复用这个本地 Agent，除非用户清理 `~/.infinite-canvas/canvas-agent.json` 里的 `origins`。
 
+## 发布
+
+`canvas-agent` 使用自己的 `package.json` 版本号，不跟仓库根目录 `VERSION` 绑定。推送到 `main` 后，GitHub Actions 会检查 npm 上是否已经存在当前包版本；不存在时才发布 `@basketikun/canvas-agent`。
+
+发布前需要在 GitHub 仓库 Secrets 中配置 `NPM_TOKEN`。
+
 ## Codex MCP
 
 如果希望 Codex 终端能直接操作画布，需要先把 Canvas Agent 注册成 Codex MCP。
@@ -35,7 +41,7 @@ Canvas Agent 默认只监听 `127.0.0.1`。网页第一次带正确 token 连接
 Canvas Agent 启动后，给 Codex 添加 MCP：
 
 ```bash
-codex mcp add infinite-canvas -- npx -y canvas-agent mcp
+codex mcp add infinite-canvas -- npx -y @basketikun/canvas-agent mcp
 ```
 
 本仓库开发时可以改成，实际使用建议替换为本机绝对路径：
@@ -51,7 +57,7 @@ Canvas Agent 源码使用 TypeScript 编写，MCP 协议层使用官方 `@modelc
 ```toml
 [mcp_servers.infinite-canvas]
 command = "npx"
-args = ["-y", "canvas-agent", "mcp"]
+args = ["-y", "@basketikun/canvas-agent", "mcp"]
 default_tools_approval_mode = "approve"
 ```
 
@@ -95,7 +101,7 @@ Claude Code Adapter 代码暂时保留，但当前网页侧边栏只开放 Codex
 如果希望 Claude Code 也能操作画布，需要给 Claude Code 添加同一个 MCP。建议用 user scope，避免 Canvas Agent 从不同目录启动时找不到配置：
 
 ```bash
-claude mcp add --scope user --transport stdio infinite-canvas -- npx -y canvas-agent mcp
+claude mcp add --scope user --transport stdio infinite-canvas -- npx -y @basketikun/canvas-agent mcp
 ```
 
 本仓库开发时可以改成：
