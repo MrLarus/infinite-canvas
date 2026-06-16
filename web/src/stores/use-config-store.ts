@@ -32,6 +32,10 @@ export type AiConfig = {
     audioModels: string[];
     quality: string;
     size: string;
+    imageSize: string;
+    videoSize: string;
+    rememberLastImageSize: string;
+    rememberLastVideoSize: string;
     count: string;
     canvasImageCount: string;
 };
@@ -76,7 +80,11 @@ export const defaultConfig: AiConfig = {
     textModels: [],
     audioModels: [],
     quality: "auto",
-    size: "1:1",
+    size: "auto",
+    imageSize: "auto",
+    videoSize: "auto",
+    rememberLastImageSize: "true",
+    rememberLastVideoSize: "true",
     count: "1",
     canvasImageCount: "3",
 };
@@ -93,6 +101,14 @@ export const defaultWebdavSyncConfig: WebdavSyncConfig = {
     lastAutoSyncedAt: "",
     lastAutoSyncError: "",
 };
+
+export function resolveImageSize(config: Pick<AiConfig, "imageSize" | "size">) {
+    return config.imageSize || config.size || defaultConfig.imageSize;
+}
+
+export function resolveVideoSize(config: Pick<AiConfig, "videoSize" | "size">) {
+    return config.videoSize || config.size || defaultConfig.videoSize;
+}
 
 const WEBDAV_TRIM_KEYS = new Set<keyof WebdavSyncConfig>(["url", "username", "password", "directory", "configuredAt", "lastSyncedAt", "lastAutoSyncedAt", "lastAutoSyncError"]);
 const WEBDAV_EDGE_INVISIBLE_PATTERN = /^[\s\uFEFF\xA0\u180E\u200B-\u200D\u2060]+|[\s\uFEFF\xA0\u180E\u200B-\u200D\u2060]+$/g;
@@ -263,6 +279,7 @@ export const useConfigStore = create<ConfigStore>()(
                 const persistedConfig = (persistedState.config || {}) as Partial<AiConfig>;
                 const persistedWebdav = (persistedState.webdav || {}) as Partial<WebdavSyncConfig>;
                 const config = { ...defaultConfig, ...persistedConfig };
+                const legacySize = persistedConfig.size || defaultConfig.size;
                 return {
                     ...current,
                     webdav: normalizeWebdavConfig({ ...defaultWebdavSyncConfig, ...persistedWebdav }),
@@ -282,6 +299,11 @@ export const useConfigStore = create<ConfigStore>()(
                         videoGenerateAudio: config.videoGenerateAudio || "true",
                         videoWatermark: config.videoWatermark || "false",
                         canvasImageCount: config.canvasImageCount || "3",
+                        imageSize: config.imageSize || legacySize,
+                        videoSize: config.videoSize || legacySize,
+                        size: config.size || legacySize,
+                        rememberLastImageSize: config.rememberLastImageSize === "false" ? "false" : "true",
+                        rememberLastVideoSize: config.rememberLastVideoSize === "false" ? "false" : "true",
                         imageModels: Array.isArray(persistedConfig.imageModels) ? normalizeModelList(config.imageModels) : filterModelsByCapability(config.models, "image"),
                         videoModels: Array.isArray(persistedConfig.videoModels) ? normalizeModelList(config.videoModels) : filterModelsByCapability(config.models, "video"),
                         textModels: Array.isArray(persistedConfig.textModels) ? normalizeModelList(config.textModels) : filterModelsByCapability(config.models, "text"),

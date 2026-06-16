@@ -186,6 +186,8 @@ export function videoSecondsLabel(value: string) {
 export function normalizeVideoSizeValue(value: string) {
     if (value === "auto") return "auto";
     if (/^\d+x\d+$/.test(value || "")) return value;
+    if (value === "1:1") return "1024x1024";
+    if (value === "3:2" || value === "4:3" || value === "16:9") return "1280x720";
     return ["9:16", "2:3", "3:4"].includes(value) ? "720x1280" : "1280x720";
 }
 

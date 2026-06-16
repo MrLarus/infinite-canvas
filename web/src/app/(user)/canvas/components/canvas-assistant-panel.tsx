@@ -7,7 +7,7 @@ import { motion } from "motion/react";
 
 import { ImageGenerationPending } from "@/components/image-generation-pending";
 import { ModelPicker } from "@/components/model-picker";
-import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { resolveImageSize, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
@@ -61,12 +61,18 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
     const [removedReferenceIds, setRemovedReferenceIds] = useState<Set<string>>(new Set());
     const [localSessions, setLocalSessions] = useState<CanvasAssistantSession[]>(() => (sessions.length ? sessions : [createSession()]));
     const [localActiveSessionId, setLocalActiveSessionId] = useState<string | null>(activeSessionId);
+    const defaultImageSize = resolveImageSize(effectiveConfig);
+    const [activeImageSize, setActiveImageSize] = useState(defaultImageSize);
 
     useEffect(() => {
         if (!sessions.length) return;
         setLocalSessions(sessions);
         setLocalActiveSessionId(activeSessionId);
     }, [activeSessionId, sessions]);
+
+    useEffect(() => {
+        setActiveImageSize(defaultImageSize);
+    }, [defaultImageSize]);
 
     useEffect(() => {
         onSessionsChange(localSessions, localActiveSessionId);
@@ -80,7 +86,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
     const selectedNodeKey = useMemo(() => Array.from(selectedNodeIds).sort().join(","), [selectedNodeIds]);
     const allSelectedReferences = useMemo(() => buildAssistantReferences(nodes, selectedNodeIds), [nodes, selectedNodeIds]);
     const selectedReferences = useMemo(() => allSelectedReferences.filter((item) => !removedReferenceIds.has(item.id)), [allSelectedReferences, removedReferenceIds]);
-    const assistantConfig = useMemo(() => ({ ...effectiveConfig, count: effectiveConfig.canvasImageCount || effectiveConfig.count }), [effectiveConfig]);
+    const assistantConfig = useMemo(() => ({ ...effectiveConfig, count: effectiveConfig.canvasImageCount || effectiveConfig.count, size: activeImageSize }), [activeImageSize, effectiveConfig]);
     const iconButtonStyle = { color: theme.node.muted };
 
     useEffect(() => {
@@ -141,7 +147,12 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
     };
 
     const sendMessage = async (text: string, nextMode: AssistantMode, history: CanvasAssistantMessage[], savedReferences?: CanvasAssistantReference[]) => {
-        const requestConfig = { ...effectiveConfig, count: nextMode === "image" ? effectiveConfig.canvasImageCount || effectiveConfig.count : effectiveConfig.count, model: nextMode === "image" ? effectiveConfig.imageModel || effectiveConfig.model : effectiveConfig.textModel || effectiveConfig.model };
+        const requestConfig = {
+            ...effectiveConfig,
+            count: nextMode === "image" ? effectiveConfig.canvasImageCount || effectiveConfig.count : effectiveConfig.count,
+            size: nextMode === "image" ? activeImageSize : effectiveConfig.size,
+            model: nextMode === "image" ? effectiveConfig.imageModel || effectiveConfig.model : effectiveConfig.textModel || effectiveConfig.model,
+        };
         if (!isAiConfigReady(requestConfig, requestConfig.model)) {
             openConfigDialog(true);
             return;
@@ -173,6 +184,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
                     images: storedImages.map((image, index) => ({ id: images[index].id, dataUrl: image.url, storageKey: image.storageKey, prompt: text })),
                     isLoading: false,
                 });
+                if (requestConfig.rememberLastImageSize !== "false") updateConfig("imageSize", requestConfig.size);
                 return;
             }
 
@@ -324,7 +336,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
                         onModeChange={setMode}
                         onPromptChange={setPrompt}
                         onSubmit={submit}
-                        onConfigChange={(key, value) => updateConfig(key === "count" ? "canvasImageCount" : key, value)}
+                        onConfigChange={(key, value) => (key === "size" ? setActiveImageSize(value) : updateConfig(key === "count" ? "canvasImageCount" : key, value))}
                         onMissingConfig={() => openConfigDialog(true)}
                         onRemoveReference={(id) => {
                             setRemovedReferenceIds((prev) => new Set(prev).add(id));
