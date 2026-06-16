@@ -50,9 +50,9 @@ export const imageToolDefinitions: ImageToolDefinition[] = [
     {
         id: "regenerate",
         defaultVisible: true,
-        panelLabel: "重新生图",
-        label: "重新生图",
-        title: "用原提示词和规格重新生成这张图",
+        panelLabel: "再抽一张",
+        label: "二抽",
+        title: "用原提示词和规格再生成一张新图",
         icon: () => <RefreshCw className="size-4" />,
         run: (node, handlers) => handlers.onRegenerate(node),
     },

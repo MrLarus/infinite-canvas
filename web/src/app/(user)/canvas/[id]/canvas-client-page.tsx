@@ -2264,6 +2264,77 @@ function InfiniteCanvasPage() {
         [effectiveConfig, message, openConfigDialog, updateConfig],
     );
 
+    const regenerateImageNode = useCallback(
+        async (node: CanvasNodeData) => {
+            if (node.type !== CanvasNodeType.Image || !node.metadata?.content) return;
+            const batchRoot = node.metadata?.batchRootId ? nodesRef.current.find((item) => item.id === node.metadata?.batchRootId) : null;
+            const savedImageMetadata = { ...batchRoot?.metadata, ...node.metadata };
+            const prompt = (savedImageMetadata.prompt || "").trim();
+            if (!prompt) {
+                message.warning("找不到提示词，无法二抽");
+                return;
+            }
+            const generationType = savedImageMetadata.generationType || "generation";
+            const generationConfig: AiConfig = {
+                ...effectiveConfig,
+                model: savedImageMetadata.model || effectiveConfig.imageModel || effectiveConfig.model,
+                quality: savedImageMetadata.quality || effectiveConfig.quality,
+                size: savedImageMetadata.size || resolveImageSize(effectiveConfig),
+                count: "1",
+            };
+            if (!isAiConfigReady(generationConfig, generationConfig.model)) {
+                openConfigDialog(true);
+                return;
+            }
+            const referenceImages = generationType === "edit" ? await resolveMetadataReferences(savedImageMetadata) : [];
+            if (!referenceImages) {
+                message.error("参考图片已丢失，无法继续二抽");
+                return;
+            }
+
+            const childId = nanoid();
+            const generationMetadata = buildImageGenerationMetadata(generationType, generationConfig, 1, referenceImages);
+            const childNode: CanvasNodeData = {
+                id: childId,
+                type: CanvasNodeType.Image,
+                title: prompt.slice(0, 32) || "Generated Image",
+                position: { x: node.position.x + node.width + 96, y: node.position.y },
+                width: node.width || NODE_DEFAULT_SIZE[CanvasNodeType.Image].width,
+                height: node.height || NODE_DEFAULT_SIZE[CanvasNodeType.Image].height,
+                metadata: { prompt, status: NODE_STATUS_LOADING, ...generationMetadata },
+            };
+
+            setRunningNodeId(childId);
+            setNodes((prev) => [...prev, childNode]);
+            try {
+                const image = generationType === "edit" ? await requestEdit(generationConfig, prompt, referenceImages).then((items) => items[0]) : await requestGeneration(generationConfig, prompt).then((items) => items[0]);
+                if (!image) throw new Error("接口没有返回图片");
+                const uploadedImage = await uploadImage(image.dataUrl);
+                const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, childNode.width, childNode.height);
+                setNodes((prev) =>
+                    prev.map((item) =>
+                        item.id === childId
+                            ? {
+                                  ...item,
+                                  width: imageSize.width,
+                                  height: imageSize.height,
+                                  metadata: { ...item.metadata, ...imageMetadata(uploadedImage), prompt, ...generationMetadata },
+                              }
+                            : item,
+                    ),
+                );
+                if (generationConfig.rememberLastImageSize !== "false") updateConfig("imageSize", generationConfig.size);
+            } catch (error) {
+                const errorDetails = error instanceof Error ? error.message : "生成失败";
+                message.error(errorDetails);
+                setNodes((prev) => prev.map((item) => (item.id === childId ? { ...item, metadata: { ...item.metadata, status: NODE_STATUS_ERROR, errorDetails } } : item)));
+            } finally {
+                setRunningNodeId(null);
+            }
+        },
+        [effectiveConfig, isAiConfigReady, message, openConfigDialog, updateConfig],
+    );
+
     const generateImageFromTextNode = useCallback(
         (node: CanvasNodeData) => {
             const prompt = (node.metadata?.content || node.metadata?.prompt || "").trim();
@@ -2569,6 +2640,7 @@ function InfiniteCanvasPage() {
                     onAngle={(node) => setAngleNodeId(node.id)}
                     onViewImage={(node) => setPreviewNodeId(node.id)}
                     onReversePrompt={createImageReversePromptNodes}
+                    onRegenerateImage={(node) => void regenerateImageNode(node)}
                     onRetry={(node) => void handleRetryNode(node)}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
                     onDelete={(node) => deleteNodes(new Set([node.id]))}
