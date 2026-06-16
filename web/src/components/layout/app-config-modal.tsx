@@ -41,6 +41,16 @@ const webdavDomainLabels: Record<AppSyncDomainKey, string> = {
     "image-workbench": "生图工作台",
     "video-workbench": "视频创作台",
 };
+const canvasImageSizeOptions = [
+    { value: "auto", label: "自动" },
+    { value: "1:1", label: "1:1" },
+    { value: "3:2", label: "3:2" },
+    { value: "2:3", label: "2:3" },
+    { value: "4:3", label: "4:3" },
+    { value: "3:4", label: "3:4" },
+    { value: "16:9", label: "16:9" },
+    { value: "9:16", label: "9:16" },
+];
 
 function createWebdavDomainProgress(): Record<AppSyncDomainKey, WebdavDomainProgress> {
     return webdavDomainKeys.reduce(
@@ -280,7 +290,7 @@ export function AppConfigModal() {
                             </Form.Item>
                         ))}
                     </div>
-                    <div className="grid gap-4 md:grid-cols-4">
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                         <Form.Item label="画布默认生图张数" extra="新建画布生图和配置节点默认使用，单个节点仍可单独覆盖。" className="mb-4">
                             <Input
                                 type="number"
@@ -290,6 +300,9 @@ export function AppConfigModal() {
                                 onChange={(event) => updateConfig("canvasImageCount", event.target.value)}
                                 onBlur={(event) => updateConfig("canvasImageCount", normalizeImageCount(event.target.value))}
                             />
+                        </Form.Item>
+                        <Form.Item label="画布默认生图比例" extra="新建画布生图和配置节点默认使用，单个节点仍可单独覆盖。" className="mb-4">
+                            <Select value={config.size} options={canvasImageSizeOptions} onChange={(value) => updateConfig("size", value)} />
                         </Form.Item>
                         <Form.Item label="默认音频声音" className="mb-4">
                             <Select value={config.audioVoice} options={audioVoiceOptions} onChange={(value) => updateConfig("audioVoice", value)} />
