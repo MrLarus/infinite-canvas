@@ -1,11 +1,11 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Brush, Camera, Copy, FileText, Grid2x2, Lock, LockOpen, Maximize2, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
+import { Brush, Camera, Copy, FileText, Grid2x2, Lock, LockOpen, Maximize2, RefreshCw, Scissors, Sparkles, Upload, ZoomIn } from "lucide-react";
 
 import type { CanvasNodeData } from "../types";
 
-export type ImageNodeActionToolId = "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
+export type ImageNodeActionToolId = "regenerate" | "copyPrompt" | "reversePrompt" | "replace" | "resize" | "maskEdit" | "crop" | "split" | "upscale" | "superResolve" | "angle" | "view";
 export type ImageQuickToolId = "info" | "delete" | "saveAsset" | "download" | "edit" | ImageNodeActionToolId;
 
 export type ImageToolHandlers = {
@@ -18,6 +18,7 @@ export type ImageToolHandlers = {
     onSuperResolve: (node: CanvasNodeData) => void;
     onAngle: (node: CanvasNodeData) => void;
     onViewImage: (node: CanvasNodeData) => void;
+    onRegenerate: (node: CanvasNodeData) => void;
     onCopyPrompt: (node: CanvasNodeData) => void;
     onReversePrompt: (node: CanvasNodeData) => void;
 };
@@ -36,13 +37,25 @@ export type ImageToolDefinition = {
 export type ImageQuickToolsConfig = {
     ids: ImageQuickToolId[];
     showLabels: boolean;
+    version?: number;
 };
 
+export const IMAGE_QUICK_TOOLS_CONFIG_VERSION = 7;
 export const IMAGE_QUICK_TOOLS_STORAGE_KEY = "canvas-image-quick-tools-v6";
 
 const defaultBaseToolIds: ImageQuickToolId[] = ["info", "delete", "saveAsset", "download", "edit"];
+const migrationDefaultToolIds: ImageQuickToolId[] = ["regenerate"];
 
 export const imageToolDefinitions: ImageToolDefinition[] = [
+    {
+        id: "regenerate",
+        defaultVisible: true,
+        panelLabel: "重新生图",
+        label: "重新生图",
+        title: "用原提示词和规格重新生成这张图",
+        icon: () => <RefreshCw className="size-4" />,
+        run: (node, handlers) => handlers.onRegenerate(node),
+    },
     {
         id: "copyPrompt",
         defaultVisible: true,
@@ -168,12 +181,21 @@ export function readImageQuickToolsConfig(value: unknown): ImageQuickToolsConfig
     if (Array.isArray(value)) return { ids: normalizeImageQuickToolIds(value), showLabels: true };
     if (!value || typeof value !== "object") return { ids: defaultImageQuickToolIds, showLabels: true };
     const data = value as Partial<ImageQuickToolsConfig>;
+    const storedIds = Array.isArray(data.ids) ? normalizeImageQuickToolIds(data.ids) : defaultImageQuickToolIds;
+    const migratedIds = data.version === IMAGE_QUICK_TOOLS_CONFIG_VERSION ? storedIds : mergeMigratedToolIds(storedIds);
     return {
-        ids: Array.isArray(data.ids) ? normalizeImageQuickToolIds(data.ids) : defaultImageQuickToolIds,
+        ids: migratedIds,
         showLabels: data.showLabels !== false,
+        version: IMAGE_QUICK_TOOLS_CONFIG_VERSION,
     };
 }
 
 function resolveToolText(value: string | ((node: CanvasNodeData) => string), node: CanvasNodeData) {
     return typeof value === "function" ? value(node) : value;
+}
+
+function mergeMigratedToolIds(ids: ImageQuickToolId[]) {
+    const selected = new Set([...ids, ...migrationDefaultToolIds]);
+    const allIds: ImageQuickToolId[] = [...defaultBaseToolIds, ...imageToolDefinitions.map((tool) => tool.id)];
+    return allIds.filter((id) => selected.has(id));
 }
