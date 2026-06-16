@@ -6,20 +6,12 @@ import { Switch } from "antd";
 import { ImageSettingsTheme } from "@/components/image-settings-panel";
 import { boolConfig, isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceDurationOptions, seedancePixelLabel, seedanceRatioOptions, seedanceResolutionOptions } from "@/lib/seedance-video";
 import { type CanvasTheme } from "@/lib/canvas-theme";
+import { normalizeVideoSizeValue, videoSizeOptions } from "@/lib/video-generation";
 import type { AiConfig } from "@/stores/use-config-store";
 
 const resolutionOptions = [
     { value: "720", label: "720p" },
     { value: "480", label: "480p" },
-];
-
-const sizeOptions = [
-    { value: "1280x720", label: "横屏", width: 1280, height: 720 },
-    { value: "720x1280", label: "竖屏", width: 720, height: 1280 },
-    { value: "1024x1024", label: "方形", width: 1024, height: 1024 },
-    { value: "1792x1024", label: "宽屏", width: 1792, height: 1024 },
-    { value: "1024x1792", label: "长图", width: 1024, height: 1792 },
-    { value: "auto", label: "auto", width: 0, height: 0 },
 ];
 
 const secondOptions = [6, 10, 12, 16, 20];
@@ -67,7 +59,7 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                         <DimensionInput prefix="H" value={dimensions.height} disabled={size === "auto"} theme={theme} onChange={(value) => updateDimension("height", value)} />
                     </div>
                     <div className="grid grid-cols-3 gap-2.5">
-                        {sizeOptions.map((item) => (
+                        {videoSizeOptions.map((item) => (
                             <button
                                 key={item.value}
                                 type="button"
@@ -175,20 +167,12 @@ export function videoSizeLabel(value: string) {
     if (value === "adaptive" || value === "auto") return "自适应";
     if (ratio === value) return seedanceRatioOptions.find((item) => item.value === ratio)?.label || ratio;
     const size = normalizeVideoSizeValue(value);
-    return sizeOptions.find((item) => item.value === size)?.label || size;
+    return videoSizeOptions.find((item) => item.value === size)?.label || size;
 }
 
 export function videoSecondsLabel(value: string) {
     if (String(value).trim() === "-1") return "智能";
     return `${value || "6"}s`;
-}
-
-export function normalizeVideoSizeValue(value: string) {
-    if (value === "auto") return "auto";
-    if (/^\d+x\d+$/.test(value || "")) return value;
-    if (value === "1:1") return "1024x1024";
-    if (value === "3:2" || value === "4:3" || value === "16:9") return "1280x720";
-    return ["9:16", "2:3", "3:4"].includes(value) ? "720x1280" : "1280x720";
 }
 
 export function normalizeVideoResolutionValue(value: string) {

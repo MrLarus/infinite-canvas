@@ -41,7 +41,7 @@ const webdavDomainLabels: Record<AppSyncDomainKey, string> = {
     "image-workbench": "生图工作台",
     "video-workbench": "视频创作台",
 };
-const generationSizeOptions = [
+const imageGenerationSizeOptions = [
     { value: "auto", label: "自动" },
     { value: "1:1", label: "1:1" },
     { value: "3:2", label: "3:2" },
@@ -50,6 +50,14 @@ const generationSizeOptions = [
     { value: "3:4", label: "3:4" },
     { value: "16:9", label: "16:9" },
     { value: "9:16", label: "9:16" },
+];
+const videoGenerationSizeOptions = [
+    { value: "auto", label: "自动" },
+    { value: "16:9", label: "16:9" },
+    { value: "9:16", label: "9:16" },
+    { value: "1:1", label: "1:1" },
+    { value: "4:3", label: "4:3" },
+    { value: "3:4", label: "3:4" },
 ];
 
 function createWebdavDomainProgress(): Record<AppSyncDomainKey, WebdavDomainProgress> {
@@ -321,13 +329,13 @@ export function AppConfigModal() {
                     </div>
                     <div className="grid gap-4 md:grid-cols-4">
                         <Form.Item label="默认生图比例" extra="新建画布生图和图片工作台默认使用，单个节点仍可单独覆盖。" className="mb-4">
-                            <Select value={config.imageSize} options={generationSizeOptions} onChange={(value) => updateConfig("imageSize", value)} />
+                            <Select value={config.imageSize} options={imageGenerationSizeOptions} onChange={(value) => updateConfig("imageSize", value)} />
                         </Form.Item>
                         <Form.Item label="自动记住生图比例" extra="开启后，实际生图时会把本次比例保存为新的默认生图比例。" className="mb-4">
                             <Switch checked={config.rememberLastImageSize !== "false"} onChange={(checked) => updateConfig("rememberLastImageSize", String(checked))} />
                         </Form.Item>
                         <Form.Item label="默认生视频比例" extra="新建画布视频节点和视频创作台默认使用，单个节点仍可单独覆盖。" className="mb-4">
-                            <Select value={config.videoSize} options={generationSizeOptions} onChange={(value) => updateConfig("videoSize", value)} />
+                            <Select value={config.videoSize} options={videoGenerationSizeOptions} onChange={(value) => updateConfig("videoSize", value)} />
                         </Form.Item>
                         <Form.Item label="自动记住生视频比例" extra="开启后，实际生视频时会把本次比例保存为新的默认生视频比例。" className="mb-4">
                             <Switch checked={config.rememberLastVideoSize !== "false"} onChange={(checked) => updateConfig("rememberLastVideoSize", String(checked))} />
