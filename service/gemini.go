@@ -122,6 +122,8 @@ func GeminiProxyRequest(channel model.ModelChannel, path string, body []byte, co
 	switch path {
 	case "/chat/completions":
 		return geminiChatCompletions(channel, body)
+	case "/responses":
+		return nil, "", safeMessageError{message: "Gemini 调用格式暂不支持 Responses 工具调用，请使用 OpenAI 兼容渠道"}
 	case "/images/generations":
 		return geminiImageGenerations(channel, body)
 	case "/images/edits":
