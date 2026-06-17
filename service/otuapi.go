@@ -165,9 +165,10 @@ func OtuapiProxyRequest(channel model.ModelChannel, path string, body []byte, co
 	}
 	if path == "/responses" {
 		var preview otuapiResponsesRequest
-		if err := json.Unmarshal(body, &preview); err == nil && otuapiGeminiNativeChatModel(strings.ToLower(strings.TrimSpace(preview.Model))) {
-			responseBody, responseType, err := GeminiResponsesViaGenerateContent(channel, body)
-			return OtuapiProxyResult{Handled: true, Body: responseBody, ContentType: responseType, Err: err}
+		if err := json.Unmarshal(body, &preview); err == nil {
+			if message := otuapiResponsesToolUnsupportedMessage(strings.ToLower(strings.TrimSpace(preview.Model)), len(preview.Tools) > 0); message != "" {
+				return OtuapiProxyResult{Handled: true, Err: safeMessageError{message: message}}
+			}
 		}
 		responseBody, responseType, err := otuapiResponsesViaChatCompletions(channel, body)
 		return OtuapiProxyResult{Handled: true, Body: responseBody, ContentType: responseType, Err: err}
@@ -235,7 +236,7 @@ func OtuapiUsesGeminiNativeChat(channel model.ModelChannel, modelName string, pa
 	if !IsOtuapiChannel(channel) || path != "/chat/completions" {
 		return false
 	}
-	return otuapiGeminiNativeChatModel(strings.ToLower(strings.TrimSpace(modelName)))
+	return false
 }
 
 func OtuapiTestModel(channel model.ModelChannel, modelName string) (string, bool, error) {
@@ -257,16 +258,6 @@ func OtuapiTestModel(channel model.ModelChannel, modelName string) (string, bool
 	}
 	if otuapiVideoModel(model) {
 		return "视频模型配置格式已检查；后台不会调用 /v1/videos 生成任务，请到视频功能中实测。", true, nil
-	}
-	if otuapiGeminiNativeChatModel(model) {
-		result, err := GeminiTestModel(channel, modelName)
-		if err != nil {
-			return "", true, err
-		}
-		if strings.TrimSpace(result) == "" {
-			result = "ok"
-		}
-		return "文本模型测试成功：" + result, true, nil
 	}
 	return "", false, nil
 }
@@ -586,16 +577,12 @@ func otuapiVideoModel(model string) bool {
 	return strings.Contains(model, "sora") || strings.Contains(model, "veo") || strings.Contains(model, "omni")
 }
 
-func otuapiGeminiNativeChatModel(model string) bool {
-	return model == "gemini-3.5-flash"
-}
-
 func otuapiResponsesToolUnsupportedMessage(model string, hasTools bool) string {
 	if !hasTools {
 		return ""
 	}
 	switch model {
-	case "gemini-3.1-pro-preview", "gpt-4o":
+	case "gemini-3.1-pro-preview", "gemini-3.5-flash", "gpt-4o":
 		return "该文本模型本次实测长时间无响应，不适合网站 Agent 工具调用；请切换为 claude-opus-4-6"
 	default:
 		return ""

@@ -62,7 +62,7 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 	}
 	path = service.OtuapiProxyPath(channel, modelName, path)
 	if service.IsGeminiChannel(channel) {
-		FailError(w, service.GeminiUnsupportedGet(path))
+		FailAIError(w, service.GeminiUnsupportedGet(path))
 		return
 	}
 	path = resolveAIProxyPath(channel.BaseURL, modelName, path)
@@ -110,7 +110,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 			if refundErr := service.RefundUserCredits(user.ID, modelName, credits, path); refundErr != nil {
 				log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, refundErr)
 			}
-			FailError(w, result.Err)
+			FailAIError(w, result.Err)
 			return
 		}
 		if result.ContentType != "" {
@@ -129,7 +129,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 			if refundErr := service.RefundUserCredits(user.ID, modelName, credits, path); refundErr != nil {
 				log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, refundErr)
 			}
-			FailError(w, err)
+			FailAIError(w, err)
 			return
 		}
 		if responseType != "" {
@@ -151,7 +151,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 			if refundErr := service.RefundUserCredits(user.ID, modelName, credits, path); refundErr != nil {
 				log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, refundErr)
 			}
-			FailError(w, err)
+			FailAIError(w, err)
 			return
 		}
 		if responseType != "" {
@@ -189,7 +189,7 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func
 		if onFailure != nil {
 			onFailure()
 		}
-		Fail(w, aiProxyRequestErrorMessage(err))
+		FailAI(w, aiProxyRequestErrorMessage(err))
 		return
 	}
 	defer response.Body.Close()
@@ -200,7 +200,7 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func
 		if onFailure != nil {
 			onFailure()
 		}
-		Fail(w, aiUpstreamStatusMessage(response.StatusCode, body))
+		FailAI(w, aiUpstreamStatusMessage(response.StatusCode, body))
 		return
 	}
 
@@ -370,7 +370,7 @@ func aiUpstreamErrorDetail(body []byte) string {
 func friendlyUpstreamError(code string, message string) string {
 	lowerCode := strings.ToLower(strings.TrimSpace(code))
 	if strings.Contains(lowerCode, "inputvideosensitivecontentdetected") || strings.Contains(lowerCode, "privacyinformation") {
-		return strings.TrimSpace(code + " 参考视频疑似包含真人或隐私信息，火山方舟拒绝使用普通 URL 作为真人视频参考；请改用不含真人的视频、官方允许的模型产物，或已授权的 asset:// 素材。原始错误：" + message)
+		return strings.TrimSpace(code + " 参考视频疑似包含真人或隐私信息，当前视频接口拒绝使用普通 URL 作为真人视频参考；请改用不含真人的视频、接口允许的模型产物，或已授权的 asset:// 素材。原始错误：" + message)
 	}
 	return ""
 }
@@ -382,6 +382,53 @@ func safeUpstreamText(text string) string {
 		return string(runes[:300]) + "..."
 	}
 	return text
+}
+
+func FailAI(w http.ResponseWriter, msg string) {
+	Fail(w, sanitizeAIUserMessage(msg))
+}
+
+func FailAIError(w http.ResponseWriter, err error) {
+	log.Printf("request failed: %v", err)
+	if safe, ok := err.(interface{ SafeMessage() string }); ok {
+		FailAI(w, safe.SafeMessage())
+		return
+	}
+	FailAI(w, "AI 接口请求失败")
+}
+
+func sanitizeAIUserMessage(message string) string {
+	text := strings.TrimSpace(message)
+	if text == "" {
+		return "AI 接口请求失败"
+	}
+	replacements := []struct {
+		old string
+		new string
+	}{
+		{"章鱼哥 AI", "AI 接口"},
+		{"章鱼哥", "当前渠道"},
+		{"Otuapi", "当前渠道"},
+		{"otuapi", "当前渠道"},
+		{"Gemini 原生", "当前接口"},
+		{"Gemini", "当前模型"},
+		{"火山方舟", "当前视频接口"},
+		{"火山 Agent Plan", "当前视频模型"},
+		{"Agent Plan", "当前视频模型"},
+		{"Seedance 2.0", "当前视频模型"},
+		{"Seedance", "当前视频模型"},
+		{"GLM Coding Plan", "当前文本模型"},
+		{"智谱 GLM", "当前文本模型"},
+		{"智谱", "当前文本模型"},
+		{"CloudOps", "兼容文本模型"},
+		{"Image-A", "图片渠道"},
+		{"Main-A", "主渠道"},
+		{"GLM-Coding", "文本渠道"},
+	}
+	for _, item := range replacements {
+		text = strings.ReplaceAll(text, item.old, item.new)
+	}
+	return safeUpstreamText(text)
 }
 
 type aiError struct {

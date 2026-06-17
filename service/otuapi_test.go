@@ -94,16 +94,16 @@ func TestOtuapiVideoCreatePathUsesCanonicalVideosEndpoint(t *testing.T) {
 	}
 }
 
-func TestOtuapiUsesGeminiNativeChatOnlyForKnownWorkingTextModel(t *testing.T) {
+func TestOtuapiDoesNotUseGeminiNativeChatForTextProxy(t *testing.T) {
 	channel := model.ModelChannel{Protocol: "otuapi", BaseURL: "https://otuapi.com"}
-	if !OtuapiUsesGeminiNativeChat(channel, "gemini-3.5-flash", "/chat/completions") {
-		t.Fatal("gemini-3.5-flash should use Gemini native chat on Otuapi")
+	if OtuapiUsesGeminiNativeChat(channel, "gemini-3.5-flash", "/chat/completions") {
+		t.Fatal("Otuapi text proxy should not use Gemini native chat")
 	}
 	if OtuapiUsesGeminiNativeChat(channel, "gemini-3.1-pro-preview", "/chat/completions") {
-		t.Fatal("gemini-3.1-pro-preview should not use Gemini native chat without a successful upstream test")
+		t.Fatal("Otuapi text proxy should not use Gemini native chat")
 	}
 	if OtuapiUsesGeminiNativeChat(channel, "gemini-3.5-flash", "/responses") {
-		t.Fatal("Responses tool calls should not be routed to Gemini native chat")
+		t.Fatal("Otuapi Responses proxy should not use Gemini native chat")
 	}
 }
 
@@ -127,20 +127,7 @@ func TestOtuapiResponsesRejectsKnownUnstableToolModels(t *testing.T) {
 	}
 }
 
-func TestOtuapiResponsesAllowsGemini35FlashToolCalls(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var request otuapiChatRequest
-		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatalf("decode request: %v", err)
-		}
-		if request.Model != "gemini-3.5-flash" || len(request.Tools) != 1 {
-			t.Fatalf("unexpected request = %#v", request)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"chatcmpl-test","model":"gemini-3.5-flash","choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"canvas_get_state","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`))
-	}))
-	defer server.Close()
-
+func TestOtuapiResponsesRejectsGemini35FlashToolCalls(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
 		"model": "gemini-3.5-flash",
 		"input": []map[string]any{{"role": "user", "content": "read state"}},
@@ -150,20 +137,13 @@ func TestOtuapiResponsesAllowsGemini35FlashToolCalls(t *testing.T) {
 			"parameters": map[string]any{"type": "object", "properties": map[string]any{}},
 		}},
 	})
-	responseBody, _, err := otuapiResponsesViaChatCompletions(model.ModelChannel{
+	_, _, err := otuapiResponsesViaChatCompletions(model.ModelChannel{
 		Protocol: "otuapi",
-		BaseURL:  server.URL,
+		BaseURL:  "https://otuapi.com",
 		APIKey:   "test-key",
 	}, body)
-	if err != nil {
-		t.Fatalf("gemini-3.5-flash tool call should be converted: %v", err)
-	}
-	var payload otuapiResponsePayload
-	if err := json.Unmarshal(responseBody, &payload); err != nil {
-		t.Fatalf("decode response payload: %v", err)
-	}
-	if len(payload.Output) != 1 || payload.Output[0]["name"] != "canvas_get_state" {
-		t.Fatalf("unexpected output = %#v", payload.Output)
+	if err == nil || !strings.Contains(err.Error(), "claude-opus-4-6") {
+		t.Fatalf("expected explicit model guidance, got %v", err)
 	}
 }
 

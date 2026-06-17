@@ -21,6 +21,7 @@ import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot }
 const PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = PANEL_MOTION_MS / 1000;
 const ONLINE_AGENT_MAX_STEPS = 4;
+const ONLINE_AGENT_COMPATIBLE_MODELS = new Set(["claude-opus-4-6", "glm-5.2"]);
 const ONLINE_AGENT_PROMPT =
     "你是 Infinite Canvas 网页内置在线画布 Agent。当前画布 JSON 会随用户消息提供。首轮必须调用工具：只读问题调用 canvas_get_state，需要生成内容时优先调用 canvas_generate_text、canvas_generate_image、canvas_generate_video、canvas_generate_audio 或 canvas_create_generation_flow；需要创建节点时调用 canvas_create_node / canvas_create_text_node / canvas_create_config_node；需要精确批量操作时调用 canvas_apply_ops。不要输出 JSON 给用户，不要编造执行结果。工具参数涉及已有节点时必须使用当前画布 JSON 中真实存在的 id；缺少必要 id 或用户意图不明确时直接说明需要用户明确选择或说明，不要猜测。工具返回结果后，再根据真实结果回答用户。";
 
@@ -179,7 +180,6 @@ export function CanvasWebsiteAgentPanel({ snapshot, onApplyOps, onCollapse }: Ca
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
-    const updateConfig = useConfigStore((state) => state.updateConfig);
     const [width, setWidth] = useState(520);
     const [closing, setClosing] = useState(false);
     const [resizing, setResizing] = useState(false);
@@ -196,8 +196,14 @@ export function CanvasWebsiteAgentPanel({ snapshot, onApplyOps, onCollapse }: Ca
         snapshotRef.current = snapshot;
     }, [snapshot]);
 
-    const activeModel = effectiveConfig.textModel || effectiveConfig.model;
+    const [agentModel, setAgentModel] = useState("");
+    const agentConfig = useMemo(() => withAgentCompatibleModels(effectiveConfig), [effectiveConfig]);
+    const activeModel = agentModelValue(agentConfig, agentModel || effectiveConfig.textModel || effectiveConfig.model);
     const iconButtonStyle = { color: theme.node.muted };
+
+    useEffect(() => {
+        if (activeModel && activeModel !== agentModel) setAgentModel(activeModel);
+    }, [activeModel, agentModel]);
 
     const addLog = (title: string, data?: unknown) => setLogs((prev) => [{ id: nanoid(), time: new Date().toLocaleTimeString(), title, data }, ...prev].slice(0, 80));
     const addMessage = (message: CanvasAgentChatMessage) => setMessages((prev) => [...prev, message]);
@@ -421,7 +427,7 @@ export function CanvasWebsiteAgentPanel({ snapshot, onApplyOps, onCollapse }: Ca
                             sending={running}
                             placeholder="描述你想让网站 Agent 如何操作画布"
                             theme={theme}
-                            left={<ModelPicker className="h-8 max-w-[220px] shrink-0" config={effectiveConfig} value={activeModel} capability="text" onChange={(model) => updateConfig("textModel", model)} onMissingConfig={() => openConfigDialog(true)} />}
+                            left={<ModelPicker className="h-8 max-w-[220px] shrink-0" config={agentConfig} value={activeModel} capability="text" onChange={setAgentModel} onMissingConfig={() => openConfigDialog(true)} />}
                             onPromptChange={setPrompt}
                             onSubmit={submit}
                         />
@@ -602,6 +608,31 @@ function defaultGenerationModel(config: AiConfig, mode: "text" | "image" | "vide
     if (mode === "video") return config.videoModel || config.model;
     if (mode === "audio") return config.audioModel || config.model;
     return config.textModel || config.model;
+}
+
+function withAgentCompatibleModels(config: AiConfig): AiConfig {
+    if (config.channelMode !== "remote") return config;
+    const textModels = config.textModels.filter(isAgentCompatibleModel);
+    const fallback = textModels[0] || "";
+    return {
+        ...config,
+        textModels,
+        textModel: textModels.includes(config.textModel) ? config.textModel : fallback,
+        model: textModels.includes(config.model) ? config.model : fallback,
+    };
+}
+
+function agentModelValue(config: AiConfig, current: string) {
+    if (config.channelMode === "remote") {
+        if (isAgentCompatibleModel(current) && config.textModels.includes(current)) return current;
+        return config.textModels[0] || "";
+    }
+    if (isAgentCompatibleModel(current) && (!config.textModels.length || config.textModels.includes(current))) return current;
+    return config.textModels[0] || current;
+}
+
+function isAgentCompatibleModel(model: string) {
+    return ONLINE_AGENT_COMPATIBLE_MODELS.has(model.trim().toLowerCase());
 }
 
 function resolveGenerationModel(config: AiConfig, mode: "text" | "image" | "video" | "audio", model?: string) {
