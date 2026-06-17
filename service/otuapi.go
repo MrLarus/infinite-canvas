@@ -168,7 +168,10 @@ func OtuapiProxyPath(channel model.ModelChannel, modelName string, path string) 
 	}
 	model := strings.ToLower(strings.TrimSpace(modelName))
 	if path == "/images/generations" && otuapiAsyncImageModel(model) {
-		return "/videos"
+		return "/videos/"
+	}
+	if path == "/videos" && (otuapiAsyncImageModel(model) || otuapiVideoModel(model)) {
+		return "/videos/"
 	}
 	return path
 }
@@ -178,7 +181,7 @@ func OtuapiNormalizeJSONRequest(channel model.ModelChannel, modelName string, pa
 		return body, contentType
 	}
 	model := strings.ToLower(strings.TrimSpace(modelName))
-	if path == "/videos" && (otuapiAsyncImageModel(model) || otuapiVideoModel(model)) {
+	if otuapiVideoCreatePath(path) && (otuapiAsyncImageModel(model) || otuapiVideoModel(model)) {
 		if normalized, ok := otuapiNormalizeVideoJSONBody(model, body); ok {
 			return normalized, contentType
 		}
@@ -191,12 +194,16 @@ func OtuapiNormalizeFormRequest(channel model.ModelChannel, modelName string, pa
 		return body, contentType
 	}
 	model := strings.ToLower(strings.TrimSpace(modelName))
-	if path == "/videos" && otuapiVideoModel(model) {
+	if otuapiVideoCreatePath(path) && otuapiVideoModel(model) {
 		if normalized, normalizedContentType, ok := otuapiNormalizeVideoFormBody(body, contentType); ok {
 			return normalized, normalizedContentType
 		}
 	}
 	return body, contentType
+}
+
+func otuapiVideoCreatePath(path string) bool {
+	return path == "/videos" || path == "/videos/"
 }
 
 func OtuapiUsesBearerAuth(channel model.ModelChannel) bool {
