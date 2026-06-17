@@ -41,6 +41,10 @@ const emptySettings: AdminSettings = {
     private: { channels: [], promptSync: { enabled: true, cron: "*/5 * * * *" }, auth: { linuxDo: { clientId: "", clientSecret: "" } } },
 };
 const emptyChannel: AdminModelChannel = { protocol: "openai", name: "", baseUrl: "", apiKey: "", models: [], weight: 1, enabled: true, remark: "" };
+const channelProtocolOptions = [
+    { label: "OpenAI 兼容", value: "openai" },
+    { label: "Gemini 原生", value: "gemini" },
+];
 
 type SettingsTabKey = "public" | "private";
 type EditorMode = "visual" | "json";
@@ -637,7 +641,7 @@ export default function AdminSettingsPage() {
                             </Col>
                             <Col span={12}>
                                 <Form.Item name="protocol" label="协议">
-                                    <Select options={[{ label: "OpenAI", value: "openai" }]} />
+                                    <Select options={channelProtocolOptions} />
                                 </Form.Item>
                             </Col>
                             <Col span={12}>
@@ -711,7 +715,7 @@ export default function AdminSettingsPage() {
                                 </Button>
                             </Space.Compact>
                         </Flex>
-                        <Typography.Text type="secondary">如果上游不提供 OpenAI /models 模型列表接口，请在这里手动增加模型名称。</Typography.Text>
+                        <Typography.Text type="secondary">OpenAI 兼容渠道会读取 /models；Gemini 原生渠道会读取 /v1beta/models。如果上游不提供模型列表接口，请手动增加模型名称。</Typography.Text>
                         <Tabs
                             activeKey={modelSelectTab}
                             onChange={(key) => setModelSelectTab(key as ModelSelectTabKey)}
@@ -770,7 +774,7 @@ export default function AdminSettingsPage() {
                     destroyOnHidden
                 >
                     <Flex vertical gap={12}>
-                        <Typography.Text type="secondary">普通文本模型会发送一条 hi；Agent Plan / Seedance 视频模型只做配置格式检查，不会发起视频生成，也不代表模型权限已验证。</Typography.Text>
+                        <Typography.Text type="secondary">普通文本模型会发送一条 hi；Gemini 原生渠道会调用 generateContent；Agent Plan / Seedance 视频模型只做配置格式检查，不会发起视频生成，也不代表模型权限已验证。</Typography.Text>
                         <Input.Search placeholder="搜索模型..." allowClear value={testKeyword} onChange={(event) => setTestKeyword(event.target.value)} />
                         <Table
                             rowKey="model"
@@ -871,7 +875,7 @@ function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}
 
 function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChannel {
     return {
-        protocol: "openai",
+        protocol: item.protocol === "gemini" ? "gemini" : "openai",
         name: item.name || "",
         baseUrl: item.baseUrl || "",
         apiKey: item.apiKey || "",

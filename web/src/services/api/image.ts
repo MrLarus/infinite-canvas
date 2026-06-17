@@ -30,6 +30,7 @@ type AsyncImageTask = {
     content?: { url?: string; image_url?: string; video_url?: string } | null;
 };
 type AsyncImageTaskResponse = AsyncImageTask | { code?: number; data?: AsyncImageTask | null; msg?: string };
+type RequestOptions = { signal?: AbortSignal };
 
 const QUALITY_BASE: Record<string, number> = {
     low: 1024,
@@ -147,10 +148,12 @@ function parseImagePayload(payload: ImageApiResponse) {
 }
 
 function readAxiosError(error: unknown, fallback: string) {
+    if (axios.isCancel(error)) return "请求已取消";
     if (axios.isAxiosError<{ error?: { message?: string }; msg?: string; code?: number }>(error)) {
         const responseData = error.response?.data;
         return responseData?.msg || responseData?.error?.message || readStatusError(error.response?.status, fallback);
     }
+    if (error instanceof DOMException && error.name === "AbortError") return "请求已取消";
     return error instanceof Error ? error.message : fallback;
 }
 
@@ -205,14 +208,14 @@ function withSystemMessage(config: AiConfig, messages: ChatCompletionMessage[]) 
     return systemPrompt ? [{ role: "system" as const, content: systemPrompt }, ...messages] : messages;
 }
 
-export async function requestGeneration(config: AiConfig, prompt: string) {
+export async function requestGeneration(config: AiConfig, prompt: string, options?: RequestOptions) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     if (isAsyncVideoImageModel(config.model)) {
         try {
-            const tasks = await Promise.all(Array.from({ length: n }, () => requestAsyncImageTask(config, withSystemPrompt(config, prompt), quality, requestSize)));
-            const images = await Promise.all(tasks.map((task) => pollAsyncImageTask(config, task)));
+            const tasks = await Promise.all(Array.from({ length: n }, () => requestAsyncImageTask(config, withSystemPrompt(config, prompt), quality, requestSize, options)));
+            const images = await Promise.all(tasks.map((task) => pollAsyncImageTask(config, task, options)));
             refreshRemoteUser(config);
             return images.map((dataUrl) => ({ id: nanoid(), dataUrl }));
         } catch (error) {
@@ -233,6 +236,7 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
             },
             {
                 headers: aiHeaders(config, "application/json"),
+                signal: options?.signal,
             },
         );
         const images = parseImagePayload(response.data);
@@ -243,7 +247,7 @@ export async function requestGeneration(config: AiConfig, prompt: string) {
     }
 }
 
-async function requestAsyncImageTask(config: AiConfig, prompt: string, quality: string | undefined, size: string | undefined) {
+async function requestAsyncImageTask(config: AiConfig, prompt: string, quality: string | undefined, size: string | undefined, options?: RequestOptions) {
     const response = await axios.post<AsyncImageTaskResponse>(
         aiApiUrl(config, "/videos"),
         {
@@ -255,7 +259,7 @@ async function requestAsyncImageTask(config: AiConfig, prompt: string, quality: 
             response_format: "url",
             output_format: IMAGE_OUTPUT_FORMAT,
         },
-        { headers: aiHeaders(config, "application/json") },
+        { headers: aiHeaders(config, "application/json"), signal: options?.signal },
     );
     const task = unwrapAsyncImageTask(response.data);
     const id = task.id || task.task_id;
@@ -263,9 +267,10 @@ async function requestAsyncImageTask(config: AiConfig, prompt: string, quality: 
     return { id, model: config.model };
 }
 
-async function pollAsyncImageTask(config: AiConfig, task: { id: string; model: string }) {
+async function pollAsyncImageTask(config: AiConfig, task: { id: string; model: string }, options?: RequestOptions) {
     for (let attempt = 0; attempt < 120; attempt += 1) {
-        const response = await axios.get<AsyncImageTaskResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined });
+        if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        const response = await axios.get<AsyncImageTaskResponse>(aiApiUrl(config, `/videos/${task.id}`), { headers: aiHeaders(config), params: config.channelMode === "remote" ? { model: task.model } : undefined, signal: options?.signal });
         const state = unwrapAsyncImageTask(response.data);
         const status = state.status?.toLowerCase();
         if (status === "completed" || status === "succeeded") {
@@ -278,7 +283,7 @@ async function pollAsyncImageTask(config: AiConfig, task: { id: string; model: s
             throw new Error(state.error?.message || "图片生成失败");
         }
         if (attempt === 119) throw new Error("图片生成超时，请稍后重试");
-        await delay(2500);
+        await delay(2500, options?.signal);
     }
     throw new Error("图片生成超时，请稍后重试");
 }
@@ -315,11 +320,25 @@ function readUrlPath(url: string) {
     }
 }
 
-function delay(ms: number) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+function delay(ms: number, signal?: AbortSignal) {
+    return new Promise<void>((resolve, reject) => {
+        if (signal?.aborted) {
+            reject(new DOMException("Aborted", "AbortError"));
+            return;
+        }
+        const timer = setTimeout(resolve, ms);
+        signal?.addEventListener(
+            "abort",
+            () => {
+                clearTimeout(timer);
+                reject(new DOMException("Aborted", "AbortError"));
+            },
+            { once: true },
+        );
+    });
 }
 
-export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage) {
+export async function requestEdit(config: AiConfig, prompt: string, references: ReferenceImage[], mask?: ReferenceImage, options?: RequestOptions) {
     const n = Math.max(1, Math.min(15, Math.floor(Math.abs(Number(config.count)) || 1)));
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
@@ -341,7 +360,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     if (mask) formData.set("mask", dataUrlToFile(mask));
 
     try {
-        const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: aiHeaders(config) });
+        const response = await axios.post<ImageApiResponse>(aiApiUrl(config, "/images/edits"), formData, { headers: aiHeaders(config), signal: options?.signal });
         const images = parseImagePayload(response.data);
         refreshRemoteUser(config);
         return images;
@@ -350,7 +369,7 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     }
 }
 
-export async function requestImageQuestion(config: AiConfig, messages: ChatCompletionMessage[], onDelta: (text: string) => void) {
+export async function requestImageQuestion(config: AiConfig, messages: ChatCompletionMessage[], onDelta: (text: string) => void, options?: RequestOptions) {
     let buffer = "";
     let answer = "";
     let processedLength = 0;
@@ -368,6 +387,7 @@ export async function requestImageQuestion(config: AiConfig, messages: ChatCompl
                     ...aiHeaders(config, "application/json"),
                 } as Record<string, string>,
                 responseType: "text",
+                signal: options?.signal,
                 onDownloadProgress: (event) => {
                     const responseText = String(event.event?.target?.responseText || "");
                     const nextText = responseText.slice(processedLength);

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -23,5 +24,12 @@ func TestSafeUpstreamTextTruncates(t *testing.T) {
 	got := safeUpstreamText(strings.Repeat("错", 320))
 	if len([]rune(got)) != 303 {
 		t.Fatalf("truncated rune length = %d", len([]rune(got)))
+	}
+}
+
+func TestReadAIRequestCountDefaultsGeminiSingleImage(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{"model": "gemini-2.5-flash-image"})
+	if got := readAIRequestCount(body, "application/json"); got != 1 {
+		t.Fatalf("count = %d, want 1", got)
 	}
 }

@@ -56,6 +56,9 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	if err != nil {
 		return "", err
 	}
+	if IsGeminiChannel(resolved) {
+		return GeminiTestModel(resolved, modelName)
+	}
 	if isArkAgentPlanChannel(resolved) || isSeedanceModelName(modelName) {
 		return testArkSeedanceChannelModel(resolved, modelName)
 	}
@@ -343,6 +346,9 @@ func resolveAdminChannel(index *int, channel model.ModelChannel) (model.ModelCha
 }
 
 func fetchAdminChannelModels(channel model.ModelChannel) ([]string, error) {
+	if IsGeminiChannel(channel) {
+		return GeminiFetchModels(channel)
+	}
 	request, err := http.NewRequest(http.MethodGet, BuildModelChannelURL(channel, "/models"), nil)
 	if err != nil {
 		return nil, err

@@ -32,6 +32,40 @@ func TestFetchAdminChannelModelsParsesOpenAIModels(t *testing.T) {
 	}
 }
 
+func TestFetchAdminChannelModelsParsesGeminiModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Header.Get("x-goog-api-key") != "test-key" {
+			t.Fatalf("missing Gemini API key header")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"name":"models/gemini-2.5-flash-image"},{"name":"models/gemini-2.5-pro"}]}`))
+	}))
+	defer server.Close()
+
+	models, err := fetchAdminChannelModels(model.ModelChannel{
+		Protocol: "gemini",
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+	})
+	if err != nil {
+		t.Fatalf("fetchAdminChannelModels returned error: %v", err)
+	}
+	if want := []string{"gemini-2.5-flash-image", "gemini-2.5-pro"}; !reflect.DeepEqual(models, want) {
+		t.Fatalf("models = %#v, want %#v", models, want)
+	}
+}
+
+func TestBuildGeminiURLNormalizesBaseURL(t *testing.T) {
+	got := BuildGeminiURL(model.ModelChannel{BaseURL: "https://generativelanguage.googleapis.com"}, "models/gemini-test", "generateContent")
+	want := "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent"
+	if got != want {
+		t.Fatalf("BuildGeminiURL = %q, want %q", got, want)
+	}
+}
+
 func TestFetchAdminChannelModelsReportsArkPlanModelsUnsupported(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/plan/v3/models" {

@@ -53,6 +53,10 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 		Fail(w, "AI 接口请求失败")
 		return
 	}
+	if service.IsGeminiChannel(channel) {
+		FailError(w, service.GeminiUnsupportedGet(path))
+		return
+	}
 	path = resolveAIProxyPath(channel.BaseURL, modelName, path)
 	request, err := http.NewRequest(http.MethodGet, service.BuildModelChannelURL(channel, path), nil)
 	if err != nil {
@@ -86,6 +90,25 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	if err != nil {
 		log.Printf("AI proxy select channel failed: model=%s err=%v", modelName, err)
 		Fail(w, "AI 接口请求失败")
+		return
+	}
+	if service.IsGeminiChannel(channel) {
+		if err := service.ConsumeUserCredits(user.ID, modelName, credits, path); err != nil {
+			FailError(w, err)
+			return
+		}
+		responseBody, responseType, err := service.GeminiProxyRequest(channel, path, body, contentType)
+		if err != nil {
+			if refundErr := service.RefundUserCredits(user.ID, modelName, credits, path); refundErr != nil {
+				log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, refundErr)
+			}
+			FailError(w, err)
+			return
+		}
+		if responseType != "" {
+			w.Header().Set("Content-Type", responseType)
+		}
+		_, _ = w.Write(responseBody)
 		return
 	}
 	path = resolveAIProxyPath(channel.BaseURL, modelName, path)
