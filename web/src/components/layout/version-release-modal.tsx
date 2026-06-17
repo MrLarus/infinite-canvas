@@ -23,7 +23,7 @@ type VersionReleaseModalProps = {
 };
 
 export function VersionReleaseModal({ className, style }: VersionReleaseModalProps) {
-    const { open, setOpen, openReleaseModal, latestVersion, releases, checking, hasNewVersion, checkLatestRelease } = useVersionCheck();
+    const { open, setOpen, openReleaseModal, latestVersion, releases, checking, hasNotice, upstreamAuditStatus, checkLatestRelease } = useVersionCheck();
 
     return (
         <>
@@ -36,11 +36,11 @@ export function VersionReleaseModal({ className, style }: VersionReleaseModalPro
             >
                 <span className="relative inline-flex">
                     {APP_VERSION}
-                    {hasNewVersion ? <span className="absolute -right-1.5 -top-1 size-1.5 rounded-full bg-green-500" /> : null}
+                    {hasNotice ? <span className="absolute -right-1.5 -top-1 size-1.5 rounded-full bg-amber-500" /> : null}
                 </span>
             </button>
             <Modal title="版本更新" open={open} width={680} centered footer={null} onCancel={() => setOpen(false)}>
-                <div className="mb-5 grid grid-cols-2 gap-3">
+                <div className="mb-5 grid gap-3 md:grid-cols-3">
                     <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
                         <div className="text-xs text-stone-500 dark:text-stone-400">当前版本</div>
                         <div className="mt-1 text-base font-semibold text-stone-950 dark:text-stone-100">{APP_VERSION}</div>
@@ -57,6 +57,26 @@ export function VersionReleaseModal({ className, style }: VersionReleaseModalPro
                             </button>
                         </div>
                         <div className="mt-1 text-base font-semibold text-stone-950 dark:text-stone-100">{latestVersion}</div>
+                    </div>
+                    <div className="rounded-lg border border-stone-200 p-3 dark:border-stone-800">
+                        <div className="text-xs text-stone-500 dark:text-stone-400">官方上游</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            {upstreamAuditStatus.needsAudit ? (
+                                <Tag color="orange" className="m-0">
+                                    待审计
+                                </Tag>
+                            ) : upstreamAuditStatus.error ? (
+                                <Tag className="m-0">检查失败</Tag>
+                            ) : upstreamAuditStatus.checked ? (
+                                <Tag color="green" className="m-0">
+                                    已审计
+                                </Tag>
+                            ) : (
+                                <Tag className="m-0">检查中</Tag>
+                            )}
+                            {upstreamAuditStatus.latestSha ? <span className="font-mono text-xs text-stone-500 dark:text-stone-400">{upstreamAuditStatus.latestSha.slice(0, 7)}</span> : null}
+                        </div>
+                        <div className="mt-2 text-xs leading-5 text-stone-500 dark:text-stone-400">{upstreamAuditStatus.needsAudit ? "官方 main 有新提交，建议审计后再选择性合并。" : "官方 main 暂无未审计提交。"}</div>
                     </div>
                 </div>
                 <div className="max-h-[56vh] overflow-y-auto pr-2">

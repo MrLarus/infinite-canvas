@@ -5,6 +5,16 @@ import { parseChangelog, type ReleaseInfo } from "@/lib/release";
 
 const latestVersionUrl = "https://raw.githubusercontent.com/MrLarus/infinite-canvas/otuapi-async-image/VERSION";
 const latestChangelogUrl = "https://raw.githubusercontent.com/MrLarus/infinite-canvas/otuapi-async-image/CHANGELOG.md";
+const upstreamBranchUrl = "https://api.github.com/repos/basketikun/infinite-canvas/branches/main";
+const reviewedUpstreamSha = "8cbe00e3486eec00bcaf21a7c5e55fefddf28500";
+
+export type UpstreamAuditStatus = {
+    latestSha: string;
+    reviewedSha: string;
+    needsAudit: boolean;
+    checked: boolean;
+    error: boolean;
+};
 
 function readLocalReleases(): ReleaseInfo[] {
     try {
@@ -32,9 +42,17 @@ export function useVersionCheck() {
     const localReleases = useMemo(readLocalReleases, []);
     const [latestVersion, setLatestVersion] = useState(currentVersion);
     const [releases, setReleases] = useState<ReleaseInfo[]>(localReleases);
+    const [upstreamAuditStatus, setUpstreamAuditStatus] = useState<UpstreamAuditStatus>({
+        latestSha: "",
+        reviewedSha: reviewedUpstreamSha,
+        needsAudit: false,
+        checked: false,
+        error: false,
+    });
     const [checking, setChecking] = useState(false);
     const [open, setOpen] = useState(false);
     const hasNewVersion = isNewerVersion(latestVersion, currentVersion);
+    const hasNotice = hasNewVersion || upstreamAuditStatus.needsAudit;
 
     const checkLatestVersion = useCallback(async () => {
         try {
@@ -48,11 +66,31 @@ export function useVersionCheck() {
         }
     }, [currentVersion]);
 
+    const checkUpstreamAuditStatus = useCallback(async () => {
+        try {
+            const response = await fetch(upstreamBranchUrl, { headers: { Accept: "application/vnd.github+json" } });
+            if (!response.ok) throw new Error("上游状态读取失败");
+            const data = (await response.json()) as { commit?: { sha?: string } };
+            const latestSha = data.commit?.sha || "";
+            setUpstreamAuditStatus({
+                latestSha,
+                reviewedSha: reviewedUpstreamSha,
+                needsAudit: Boolean(latestSha && latestSha !== reviewedUpstreamSha),
+                checked: true,
+                error: false,
+            });
+            return true;
+        } catch {
+            setUpstreamAuditStatus((current) => ({ ...current, checked: true, error: true }));
+            return false;
+        }
+    }, []);
+
     const checkLatestRelease = useCallback(
         async (showMessage = false) => {
             setChecking(true);
             try {
-                const [versionResponse, changelogResponse] = await Promise.all([fetch(latestVersionUrl), fetch(latestChangelogUrl)]);
+                const [versionResponse, changelogResponse] = await Promise.all([fetch(latestVersionUrl), fetch(latestChangelogUrl), checkUpstreamAuditStatus()]);
                 if (!versionResponse.ok) throw new Error("版本读取失败");
                 if (!changelogResponse.ok) throw new Error("更新日志读取失败");
                 const [version, changelog] = await Promise.all([versionResponse.text(), changelogResponse.text()]);
@@ -69,12 +107,13 @@ export function useVersionCheck() {
                 setChecking(false);
             }
         },
-        [currentVersion, localReleases, message],
+        [checkUpstreamAuditStatus, currentVersion, localReleases, message],
     );
 
     useEffect(() => {
         void checkLatestVersion();
-    }, [checkLatestVersion]);
+        void checkUpstreamAuditStatus();
+    }, [checkLatestVersion, checkUpstreamAuditStatus]);
 
     const openReleaseModal = useCallback(() => {
         setOpen(true);
@@ -89,6 +128,8 @@ export function useVersionCheck() {
         releases,
         checking,
         hasNewVersion,
+        hasNotice,
+        upstreamAuditStatus,
         checkLatestRelease,
     };
 }
