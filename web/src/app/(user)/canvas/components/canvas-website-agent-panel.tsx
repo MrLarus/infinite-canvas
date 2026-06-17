@@ -700,13 +700,34 @@ function toolCallToResponseInput(call: ResponseToolCall): ResponseInputMessage {
 }
 
 function summarizeToolCalls(calls: ResponseToolCall[]) {
-    return calls.map((call) => toolCallLabel(call.function.name)).join("，") || "工具调用";
+    const labels = calls.map((call) => toolCallLabel(call.function.name));
+    if (!labels.length) return "工具调用";
+    return labels.length === 1 ? labels[0] : `${labels.length} 个工具：${labels.join("，")}`;
 }
 
 function toolCallLabel(name: string) {
     if (name === "canvas_apply_ops") return "画布操作";
     if (name === "canvas_get_state") return "读取画布";
     if (name === "canvas_get_selection") return "读取选区";
+    if (name === "canvas_export_snapshot") return "导出快照";
+    if (name === "canvas_create_node") return "创建节点";
+    if (name === "canvas_create_text_node") return "创建文本";
+    if (name === "canvas_create_text_nodes") return "批量创建文本";
+    if (name === "canvas_create_config_node") return "创建生成配置";
+    if (name === "canvas_create_image_prompt_flow") return "创建生图流程";
+    if (name === "canvas_create_generation_flow") return "创建生成流程";
+    if (name === "canvas_generate_text") return "生成文本";
+    if (name === "canvas_generate_image") return "生成图片";
+    if (name === "canvas_generate_video") return "生成视频";
+    if (name === "canvas_generate_audio") return "生成音频";
+    if (name === "canvas_update_node") return "更新节点";
+    if (name === "canvas_update_node_text") return "更新文本";
+    if (name === "canvas_move_nodes") return "移动节点";
+    if (name === "canvas_resize_node") return "调整节点尺寸";
+    if (name === "canvas_delete_nodes") return "删除节点";
+    if (name === "canvas_connect_nodes") return "连接节点";
+    if (name === "canvas_select_nodes") return "选择节点";
+    if (name === "canvas_set_viewport") return "调整视图";
     if (name === "canvas_run_generation") return "触发生成";
     return name;
 }
