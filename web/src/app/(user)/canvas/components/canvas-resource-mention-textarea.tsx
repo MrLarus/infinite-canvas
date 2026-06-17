@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent, PointerEvent, TextareaHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import { FileText, Image as ImageIcon, Music2, Video } from "lucide-react";
@@ -23,7 +23,10 @@ type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "onChange" | "val
     highlightLabels?: boolean;
 };
 
-export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea({ value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, ...props }, forwardedRef) {
+export const CanvasResourceMentionTextarea = forwardRef<HTMLTextAreaElement, Props>(function CanvasResourceMentionTextarea(
+    { value, references, onChange, onSubmit, onKeyDown, className, containerClassName, style, highlightLabels = true, ...props },
+    forwardedRef,
+) {
     const theme = canvasThemes[useThemeStore((state) => state.theme)];
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -196,8 +199,21 @@ function MentionHighlightText({ value, labels, placeholder }: { value: string; l
     );
 }
 
-function MentionMenu({ textarea, references, activeIndex, theme, onSelect }: { textarea: HTMLTextAreaElement; references: CanvasResourceReference[]; activeIndex: number; theme: (typeof canvasThemes)[keyof typeof canvasThemes]; onSelect: (reference: CanvasResourceReference) => void }) {
+function MentionMenu({
+    textarea,
+    references,
+    activeIndex,
+    theme,
+    onSelect,
+}: {
+    textarea: HTMLTextAreaElement;
+    references: CanvasResourceReference[];
+    activeIndex: number;
+    theme: (typeof canvasThemes)[keyof typeof canvasThemes];
+    onSelect: (reference: CanvasResourceReference) => void;
+}) {
     const selectedRef = useRef(false);
+    const activeItemRef = useRef<HTMLButtonElement | null>(null);
     const rect = textarea.getBoundingClientRect();
     const boundary = textarea.closest(".ant-modal-content")?.getBoundingClientRect() || { left: 8, top: 8, right: window.innerWidth - 8, bottom: window.innerHeight - 8 };
     const menuWidth = 256;
@@ -210,6 +226,11 @@ function MentionMenu({ textarea, references, activeIndex, theme, onSelect }: { t
     const stopCanvasInteraction = (event: PointerEvent | MouseEvent) => {
         event.stopPropagation();
     };
+
+    useEffect(() => {
+        activeItemRef.current?.scrollIntoView({ block: "nearest" });
+    }, [activeIndex, references]);
+
     const selectReference = (reference: CanvasResourceReference) => {
         if (selectedRef.current) return;
         selectedRef.current = true;
@@ -228,6 +249,7 @@ function MentionMenu({ textarea, references, activeIndex, theme, onSelect }: { t
             {references.map((reference, index) => (
                 <button
                     key={reference.id}
+                    ref={index === activeIndex ? activeItemRef : undefined}
                     type="button"
                     className="flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition"
                     style={{ background: index === activeIndex ? theme.toolbar.activeBg : "transparent", color: index === activeIndex ? theme.toolbar.activeText : theme.node.text }}
