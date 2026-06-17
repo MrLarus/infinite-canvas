@@ -245,16 +245,16 @@ func OtuapiTestModel(channel model.ModelChannel, modelName string) (string, bool
 		return "", true, safeMessageError{message: "缺少模型名称"}
 	}
 	if otuapiAsyncImageModel(model) {
-		return "章鱼哥异步图片模型配置格式已检查；后台不会调用 /v1/videos 生成任务，请到生图功能中实测。", true, nil
+		return "异步图片模型配置格式已检查；后台不会调用 /v1/videos 生成任务，请到生图功能中实测。", true, nil
 	}
 	if strings.Contains(model, "gemini") && strings.Contains(model, "image-preview") {
-		return "章鱼哥 Gemini 原生图片模型配置格式已检查；后台不会调用 generateContent 生成图片，请到生图功能中实测。", true, nil
+		return "图片模型配置格式已检查；后台不会调用 generateContent 生成图片，请到生图功能中实测。", true, nil
 	}
 	if model == "image2" || strings.Contains(model, "image-preview") {
-		return "章鱼哥同步图片模型配置格式已检查；后台不会调用 /v1/images/generations 生成图片，请到生图功能中实测。", true, nil
+		return "同步图片模型配置格式已检查；后台不会调用 /v1/images/generations 生成图片，请到生图功能中实测。", true, nil
 	}
 	if otuapiVideoModel(model) {
-		return "章鱼哥视频模型配置格式已检查；后台不会调用 /v1/videos 生成任务，请到视频功能中实测。", true, nil
+		return "视频模型配置格式已检查；后台不会调用 /v1/videos 生成任务，请到视频功能中实测。", true, nil
 	}
 	if otuapiGeminiNativeChatModel(model) {
 		result, err := GeminiTestModel(channel, modelName)
@@ -264,7 +264,7 @@ func OtuapiTestModel(channel model.ModelChannel, modelName string) (string, bool
 		if strings.TrimSpace(result) == "" {
 			result = "ok"
 		}
-		return "章鱼哥 Gemini 原生文本模型测试成功：" + result, true, nil
+		return "文本模型测试成功：" + result, true, nil
 	}
 	return "", false, nil
 }
@@ -332,14 +332,14 @@ func otuapiResponsesViaChatCompletions(channel model.ModelChannel, body []byte) 
 	response, err := otuapiModelHTTPClient.Do(request)
 	if err != nil {
 		if isTimeoutError(err) {
-			return nil, "", safeMessageError{message: "章鱼哥 AI 上游模型长时间没有响应，请检查该模型在章鱼哥后台是否可用，或切换其他文本模型重试"}
+			return nil, "", safeMessageError{message: "AI 上游模型长时间没有响应，请检查该模型在当前渠道是否可用，或切换其他文本模型重试"}
 		}
-		return nil, "", safeMessageError{message: "章鱼哥 AI 接口无响应或网络不可达"}
+		return nil, "", safeMessageError{message: "AI 接口无响应或网络不可达"}
 	}
 	defer response.Body.Close()
 	responseBody, _ := io.ReadAll(response.Body)
 	if response.StatusCode >= http.StatusBadRequest {
-		return nil, "", readAdminChannelError(responseBody, response.StatusCode, "章鱼哥 AI 请求失败")
+		return nil, "", readAdminChannelError(responseBody, response.StatusCode, "AI 请求失败")
 	}
 	payload, content, err := otuapiResponsesPayloadFromChat(responseBody, responsesRequest.Model)
 	if err != nil {
@@ -484,7 +484,7 @@ func otuapiChatToolChoice(value any) any {
 func otuapiResponsesPayloadFromChat(body []byte, fallbackModel string) (otuapiResponsePayload, string, error) {
 	var chat otuapiChatResponse
 	if err := json.Unmarshal(body, &chat); err != nil {
-		return otuapiResponsePayload{}, "", safeMessageError{message: "章鱼哥 AI 响应解析失败"}
+		return otuapiResponsePayload{}, "", safeMessageError{message: "AI 响应解析失败"}
 	}
 	if chat.Error != nil && strings.TrimSpace(chat.Error.Message) != "" {
 		return otuapiResponsePayload{}, "", safeMessageError{message: chat.Error.Message}
@@ -574,7 +574,7 @@ func otuapiResponsesToolUnsupportedMessage(model string, hasTools bool) string {
 	}
 	switch model {
 	case "gemini-3.1-pro-preview", "gpt-4o":
-		return "该章鱼哥文本模型本次实测长时间无响应，不适合网站 Agent 工具调用；请切换为 claude-opus-4-6"
+		return "该文本模型本次实测长时间无响应，不适合网站 Agent 工具调用；请切换为 claude-opus-4-6"
 	default:
 		return ""
 	}
@@ -589,7 +589,7 @@ func (err safeOtuapiModelError) SafeMessage() string {
 	if model == "" {
 		model = "当前模型"
 	}
-	return "章鱼哥 " + model + " 不适合当前网站 Agent 工具调用：" + err.message + "。请切换 claude-opus-4-6，或在普通文本对话中使用该模型。"
+	return model + " 不适合当前网站 Agent 工具调用：" + err.message + "。请切换 claude-opus-4-6，或在普通文本对话中使用该模型。"
 }
 
 func otuapiNormalizeVideoJSONBody(model string, body []byte) ([]byte, bool) {
