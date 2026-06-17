@@ -218,6 +218,7 @@ func isVersionedModelChannelBaseURL(baseURL string) bool {
 	return strings.HasSuffix(lowerBaseURL, "/v1") ||
 		strings.HasSuffix(lowerBaseURL, "/api/v3") ||
 		strings.HasSuffix(lowerBaseURL, "/api/plan/v3") ||
+		strings.HasSuffix(lowerBaseURL, "/api/coding/paas/v4") ||
 		strings.HasSuffix(lowerBaseURL, "/api/paas/v4")
 }
 
@@ -244,6 +245,11 @@ func normalizeModelChannelBaseURL(baseURL string) string {
 func isArkAgentPlanChannel(channel model.ModelChannel) bool {
 	baseURL := strings.ToLower(normalizeModelChannelBaseURL(channel.BaseURL))
 	return strings.HasSuffix(baseURL, "/api/plan/v3")
+}
+
+func isGLMCodingPlanChannel(channel model.ModelChannel) bool {
+	baseURL := strings.ToLower(normalizeModelChannelBaseURL(channel.BaseURL))
+	return strings.HasSuffix(baseURL, "/api/coding/paas/v4")
 }
 
 func isSeedanceModelName(modelName string) bool {
@@ -376,6 +382,9 @@ func fetchAdminChannelModels(channel model.ModelChannel) ([]string, error) {
 	if response.StatusCode >= http.StatusBadRequest {
 		if response.StatusCode == http.StatusNotFound && isArkAgentPlanChannel(channel) {
 			return nil, safeMessageError{message: "火山方舟 Agent Plan 未提供 OpenAI /models 模型列表接口，请手动填写模型名称，例如 doubao-seedance-2.0。"}
+		}
+		if isGLMCodingPlanChannel(channel) {
+			return nil, safeMessageError{message: "智谱 GLM Coding Plan 可能不提供标准 OpenAI /models 模型列表接口，请手动填写模型名称，例如 glm-5.2。"}
 		}
 		return nil, readAdminChannelError(body, response.StatusCode, "读取模型失败")
 	}

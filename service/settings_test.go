@@ -103,6 +103,35 @@ func TestBuildModelChannelURLKeepsGLMPaasV4Base(t *testing.T) {
 	}
 }
 
+func TestBuildModelChannelURLKeepsGLMCodingPaasV4Base(t *testing.T) {
+	got := BuildModelChannelURL(model.ModelChannel{BaseURL: "https://open.bigmodel.cn/api/coding/paas/v4"}, "/chat/completions")
+	want := "https://open.bigmodel.cn/api/coding/paas/v4/chat/completions"
+	if got != want {
+		t.Fatalf("BuildModelChannelURL = %q, want %q", got, want)
+	}
+}
+
+func TestFetchAdminChannelModelsReportsGLMCodingModelsUnsupported(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/coding/paas/v4/models" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	_, err := fetchAdminChannelModels(model.ModelChannel{
+		BaseURL: server.URL + "/api/coding/paas/v4",
+		APIKey:  "test-key",
+	})
+	if err == nil {
+		t.Fatal("expected unsupported /models error")
+	}
+	if !strings.Contains(err.Error(), "glm-5.2") {
+		t.Fatalf("error = %q", err.Error())
+	}
+}
+
 func TestNormalizeSettingsPublishesEnabledChannelModelsAndRepairsDefaults(t *testing.T) {
 	settings := normalizeSettings(model.Settings{
 		Public: model.PublicSetting{

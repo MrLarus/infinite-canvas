@@ -403,7 +403,12 @@ export function buildApiUrl(baseUrl: string, path: string) {
     let normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, "");
     normalizedBaseUrl = normalizeArkPlanBaseUrl(normalizedBaseUrl);
     const lowerBaseUrl = normalizedBaseUrl.toLowerCase();
-    const isVersioned = lowerBaseUrl.endsWith("/v1") || lowerBaseUrl.endsWith("/api/v3") || lowerBaseUrl.endsWith("/api/plan/v3") || lowerBaseUrl.endsWith("/api/paas/v4");
+    const isVersioned =
+        lowerBaseUrl.endsWith("/v1") ||
+        lowerBaseUrl.endsWith("/api/v3") ||
+        lowerBaseUrl.endsWith("/api/plan/v3") ||
+        lowerBaseUrl.endsWith("/api/coding/paas/v4") ||
+        lowerBaseUrl.endsWith("/api/paas/v4");
     const apiBaseUrl = isVersioned ? normalizedBaseUrl : `${normalizedBaseUrl}/v1`;
     return `${apiBaseUrl}${path}`;
 }
