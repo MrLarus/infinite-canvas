@@ -218,6 +218,13 @@ func OtuapiUsesGeminiNativeImage(channel model.ModelChannel, modelName string, p
 	return strings.Contains(model, "gemini") && strings.Contains(model, "image-preview")
 }
 
+func OtuapiUsesGeminiNativeChat(channel model.ModelChannel, modelName string, path string) bool {
+	if !IsOtuapiChannel(channel) || path != "/chat/completions" {
+		return false
+	}
+	return otuapiGeminiNativeChatModel(strings.ToLower(strings.TrimSpace(modelName)))
+}
+
 func OtuapiTestModel(channel model.ModelChannel, modelName string) (string, bool, error) {
 	if !IsOtuapiChannel(channel) {
 		return "", false, nil
@@ -238,6 +245,16 @@ func OtuapiTestModel(channel model.ModelChannel, modelName string) (string, bool
 	if otuapiVideoModel(model) {
 		return "章鱼哥视频模型配置格式已检查；后台不会调用 /v1/videos 生成任务，请到视频功能中实测。", true, nil
 	}
+	if otuapiGeminiNativeChatModel(model) {
+		result, err := GeminiTestModel(channel, modelName)
+		if err != nil {
+			return "", true, err
+		}
+		if strings.TrimSpace(result) == "" {
+			result = "ok"
+		}
+		return "章鱼哥 Gemini 原生文本模型测试成功：" + result, true, nil
+	}
 	return "", false, nil
 }
 
@@ -245,6 +262,9 @@ func otuapiResponsesViaChatCompletions(channel model.ModelChannel, body []byte) 
 	var responsesRequest otuapiResponsesRequest
 	if err := json.Unmarshal(body, &responsesRequest); err != nil {
 		return nil, "", safeMessageError{message: "Responses 请求解析失败"}
+	}
+	if message := otuapiResponsesToolUnsupportedMessage(strings.ToLower(strings.TrimSpace(responsesRequest.Model)), len(responsesRequest.Tools) > 0); message != "" {
+		return nil, "", safeMessageError{message: message}
 	}
 	chatRequest, err := otuapiChatRequestFromResponses(responsesRequest)
 	if err != nil {
@@ -461,6 +481,24 @@ func otuapiAsyncImageModel(model string) bool {
 
 func otuapiVideoModel(model string) bool {
 	return strings.Contains(model, "sora") || strings.Contains(model, "veo") || strings.Contains(model, "omni")
+}
+
+func otuapiGeminiNativeChatModel(model string) bool {
+	return model == "gemini-3.5-flash"
+}
+
+func otuapiResponsesToolUnsupportedMessage(model string, hasTools bool) string {
+	if !hasTools {
+		return ""
+	}
+	switch model {
+	case "gemini-3.5-flash":
+		return "章鱼哥 gemini-3.5-flash 普通聊天已改走 Gemini 原生接口，但网站 Agent 工具调用在章鱼哥上游超时；请将网站 Agent 文本模型切换为 claude-opus-4-6"
+	case "gemini-3.1-pro-preview", "gpt-4o":
+		return "该章鱼哥文本模型本次实测长时间无响应，不适合网站 Agent 工具调用；请切换为 claude-opus-4-6"
+	default:
+		return ""
+	}
 }
 
 func otuapiNormalizeVideoJSONBody(model string, body []byte) ([]byte, bool) {

@@ -8,9 +8,12 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/basketikun/infinite-canvas/model"
 )
+
+var geminiGenerateHTTPClient = &http.Client{Timeout: 65 * time.Second}
 
 type GeminiPart struct {
 	Text       string             `json:"text,omitempty"`
@@ -75,7 +78,7 @@ func GeminiFetchModels(channel model.ModelChannel) ([]string, error) {
 		return nil, err
 	}
 	setGeminiAuthHeader(request, channel)
-	response, err := adminModelHTTPClient.Do(request)
+	response, err := geminiGenerateHTTPClient.Do(request)
 	if err != nil {
 		return nil, safeMessageError{message: "读取模型失败：Gemini 接口无响应或网络不可达"}
 	}
@@ -358,7 +361,7 @@ func doGeminiGenerate(channel model.ModelChannel, modelName string, body []byte)
 	}
 	setGeminiAuthHeader(request, channel)
 	request.Header.Set("Content-Type", "application/json")
-	response, err := adminModelHTTPClient.Do(request)
+	response, err := geminiGenerateHTTPClient.Do(request)
 	if err != nil {
 		return nil, safeMessageError{message: "Gemini 接口无响应或网络不可达"}
 	}

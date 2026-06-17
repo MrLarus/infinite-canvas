@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/basketikun/infinite-canvas/model"
@@ -90,5 +91,38 @@ func TestOtuapiVideoCreatePathUsesCanonicalVideosEndpoint(t *testing.T) {
 	}
 	if got := OtuapiProxyPath(channel, "sora-2-12s", "/videos/task_123"); got != "/videos/task_123" {
 		t.Fatalf("video query path = %q, want /videos/task_123", got)
+	}
+}
+
+func TestOtuapiUsesGeminiNativeChatOnlyForKnownWorkingTextModel(t *testing.T) {
+	channel := model.ModelChannel{Protocol: "otuapi", BaseURL: "https://otuapi.com"}
+	if !OtuapiUsesGeminiNativeChat(channel, "gemini-3.5-flash", "/chat/completions") {
+		t.Fatal("gemini-3.5-flash should use Gemini native chat on Otuapi")
+	}
+	if OtuapiUsesGeminiNativeChat(channel, "gemini-3.1-pro-preview", "/chat/completions") {
+		t.Fatal("gemini-3.1-pro-preview should not use Gemini native chat without a successful upstream test")
+	}
+	if OtuapiUsesGeminiNativeChat(channel, "gemini-3.5-flash", "/responses") {
+		t.Fatal("Responses tool calls should not be routed to Gemini native chat")
+	}
+}
+
+func TestOtuapiResponsesRejectsKnownUnstableToolModels(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"model": "gemini-3.5-flash",
+		"input": []map[string]any{{"role": "user", "content": "read state"}},
+		"tools": []map[string]any{{
+			"type": "function",
+			"name": "canvas_get_state",
+			"parameters": map[string]any{"type": "object", "properties": map[string]any{}},
+		}},
+	})
+	_, _, err := otuapiResponsesViaChatCompletions(model.ModelChannel{
+		Protocol: "otuapi",
+		BaseURL:  "https://otuapi.com",
+		APIKey:   "test-key",
+	}, body)
+	if err == nil || !strings.Contains(err.Error(), "claude-opus-4-6") {
+		t.Fatalf("expected explicit model guidance, got %v", err)
 	}
 }

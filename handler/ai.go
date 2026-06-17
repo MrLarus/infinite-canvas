@@ -122,7 +122,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	path = service.OtuapiProxyPath(channel, modelName, path)
 	body, contentType = service.OtuapiNormalizeJSONRequest(channel, modelName, path, body, contentType)
 	body, contentType = service.OtuapiNormalizeFormRequest(channel, modelName, path, body, contentType)
-	if service.IsGeminiChannel(channel) || service.OtuapiUsesGeminiNativeImage(channel, modelName, path) {
+	if service.IsGeminiChannel(channel) || service.OtuapiUsesGeminiNativeImage(channel, modelName, path) || service.OtuapiUsesGeminiNativeChat(channel, modelName, path) {
 		if err := service.ConsumeUserCredits(user.ID, modelName, credits, path); err != nil {
 			FailError(w, err)
 			return
