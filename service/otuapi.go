@@ -168,10 +168,10 @@ func OtuapiProxyPath(channel model.ModelChannel, modelName string, path string) 
 	}
 	model := strings.ToLower(strings.TrimSpace(modelName))
 	if path == "/images/generations" && otuapiAsyncImageModel(model) {
-		return "/videos/"
+		return "/videos"
 	}
 	if path == "/videos" && (otuapiAsyncImageModel(model) || otuapiVideoModel(model)) {
-		return "/videos/"
+		return "/videos"
 	}
 	return path
 }

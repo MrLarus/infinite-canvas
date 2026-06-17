@@ -80,13 +80,13 @@ func TestOtuapiResponsesViaChatCompletionsConvertsToolCalls(t *testing.T) {
 	}
 }
 
-func TestOtuapiVideoCreatePathUsesTrailingSlash(t *testing.T) {
+func TestOtuapiVideoCreatePathUsesCanonicalVideosEndpoint(t *testing.T) {
 	channel := model.ModelChannel{Protocol: "otuapi", BaseURL: "https://otuapi.com"}
-	if got := OtuapiProxyPath(channel, "gpt-image-2", "/images/generations"); got != "/videos/" {
-		t.Fatalf("async image path = %q, want /videos/", got)
+	if got := OtuapiProxyPath(channel, "gpt-image-2", "/images/generations"); got != "/videos" {
+		t.Fatalf("async image path = %q, want /videos", got)
 	}
-	if got := OtuapiProxyPath(channel, "sora-2-12s", "/videos"); got != "/videos/" {
-		t.Fatalf("video create path = %q, want /videos/", got)
+	if got := OtuapiProxyPath(channel, "sora-2-12s", "/videos"); got != "/videos" {
+		t.Fatalf("video create path = %q, want /videos", got)
 	}
 	if got := OtuapiProxyPath(channel, "sora-2-12s", "/videos/task_123"); got != "/videos/task_123" {
 		t.Fatalf("video query path = %q, want /videos/task_123", got)
