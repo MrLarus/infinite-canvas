@@ -6,6 +6,7 @@ import { Button, Switch, Tooltip } from "antd";
 import { motion } from "motion/react";
 import { nanoid } from "nanoid";
 
+import { ModelPicker } from "@/components/model-picker";
 import { requestToolResponse, type ResponseFunctionTool, type ResponseInputMessage, type ResponseToolCall } from "@/services/api/image";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { normalizeModelOptionValue, resolveImageSize, resolveVideoSize, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
@@ -176,6 +177,7 @@ export function CanvasWebsiteAgentPanel({ snapshot, onApplyOps, onCollapse }: Ca
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const updateConfig = useConfigStore((state) => state.updateConfig);
     const [width, setWidth] = useState(520);
     const [closing, setClosing] = useState(false);
     const [resizing, setResizing] = useState(false);
@@ -412,7 +414,15 @@ export function CanvasWebsiteAgentPanel({ snapshot, onApplyOps, onCollapse }: Ca
                             {messages.length ? messages.map((item) => <AgentChatMessage key={item.id} item={item} theme={theme} user={user} onApproveTool={approveTool} onRejectTool={rejectTool} />) : <EmptyAgentState theme={theme} />}
                             {running ? <AgentWorkingMessage theme={theme} /> : null}
                         </div>
-                        <AgentChatComposer prompt={prompt} sending={running} placeholder="描述你想让网站 Agent 如何操作画布" theme={theme} onPromptChange={setPrompt} onSubmit={submit} />
+                        <AgentChatComposer
+                            prompt={prompt}
+                            sending={running}
+                            placeholder="描述你想让网站 Agent 如何操作画布"
+                            theme={theme}
+                            left={<ModelPicker className="h-8 max-w-[220px] shrink-0" config={effectiveConfig} value={activeModel} capability="text" onChange={(model) => updateConfig("textModel", model)} onMissingConfig={() => openConfigDialog(true)} />}
+                            onPromptChange={setPrompt}
+                            onSubmit={submit}
+                        />
                     </>
                 ) : (
                     <AgentLogView context={logContext} theme={theme} />
