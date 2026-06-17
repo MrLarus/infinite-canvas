@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, PanelRightClose, Plus, Settings2, ShieldCheck, Trash2 } from "lucide-react";
-import { Button, Switch, Tooltip } from "antd";
+import copyToClipboard from "copy-to-clipboard";
+import { Bot, Copy, PanelRightClose, Plus, Settings2, ShieldCheck, Trash2 } from "lucide-react";
+import { Button, Segmented, Switch, Tooltip } from "antd";
 import { motion } from "motion/react";
 import { nanoid } from "nanoid";
 
@@ -161,6 +162,7 @@ const READ_TOOL_NAMES = new Set(["canvas_get_state", "canvas_get_selection", "ca
 
 type AgentTab = "chat" | "log";
 type AgentLog = { id: string; time: string; title: string; data?: unknown };
+type AgentLogContext = { model: string; running: boolean; confirmTools: boolean; nodes: number; connections: number; logs: AgentLog[] };
 type ToolResult = { ok: true; message: string; data?: unknown } | { ok: false; message: string; data?: unknown };
 type ExecutedToolCall = { toolCallId: string; name: string; result: ToolResult };
 type PendingToolContext = { messages: ResponseInputMessage[]; toolCalls: ResponseToolCall[]; assistantId: string; step: number };
@@ -819,13 +821,72 @@ function EmptyAgentState({ theme }: { theme: (typeof canvasThemes)[keyof typeof 
     );
 }
 
-function AgentLogView({ context, theme }: { context: { model: string; running: boolean; confirmTools: boolean; nodes: number; connections: number; logs: AgentLog[] }; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
-    const text = JSON.stringify(context, null, 2);
+function AgentLogView({ context, theme }: { context: AgentLogContext; theme: (typeof canvasThemes)[keyof typeof canvasThemes] }) {
+    const [mode, setMode] = useState<"text" | "json">("text");
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const content = mode === "text" ? formatAgentLogText(context) : formatAgentLogJson(context);
+    const lastError = [...context.logs].reverse().find((item) => /错误|失败|error/i.test(`${item.title}\n${stringifyLog(item.data)}`));
+    const copy = async (value = content) => {
+        if (await copyToClipboard(value)) return;
+        textareaRef.current?.focus();
+        textareaRef.current?.select();
+        document.execCommand("copy");
+    };
+
     return (
-        <div className="thin-scrollbar min-h-0 flex-1 overflow-auto p-4">
-            <pre className="min-h-full whitespace-pre-wrap rounded-xl border p-3 text-[11px] leading-4" style={{ borderColor: theme.node.stroke, background: theme.toolbar.panel, color: theme.node.muted }}>
-                {text}
-            </pre>
+        <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+                <Segmented
+                    size="small"
+                    value={mode}
+                    onChange={(value) => setMode(value as "text" | "json")}
+                    options={[
+                        { label: "排查日志", value: "text" },
+                        { label: "原始 JSON", value: "json" },
+                    ]}
+                />
+                <span className="text-xs" style={{ color: theme.node.muted }}>
+                    {context.logs.length} 条
+                </span>
+                <Button size="small" icon={<Copy className="size-3.5" />} disabled={!context.logs.length} onClick={() => void copy()}>
+                    复制
+                </Button>
+                <Button size="small" disabled={!lastError} onClick={() => lastError && void copy(formatAgentLogText({ ...context, logs: [lastError] }))}>
+                    最近错误
+                </Button>
+            </div>
+            <textarea
+                ref={textareaRef}
+                readOnly
+                value={content}
+                className="thin-scrollbar min-h-[360px] flex-1 resize-none rounded-xl border bg-transparent p-3 font-mono text-xs leading-5 outline-none"
+                style={{ borderColor: theme.node.stroke, background: theme.toolbar.panel, color: theme.node.text }}
+            />
         </div>
     );
+}
+
+function formatAgentLogText(context: AgentLogContext) {
+    const head = [
+        "Infinite Canvas 网站 Agent 诊断日志",
+        `model: ${context.model || "none"}`,
+        `running: ${context.running}`,
+        `confirmTools: ${context.confirmTools}`,
+        `nodes: ${context.nodes}`,
+        `connections: ${context.connections}`,
+        `logs: ${context.logs.length}`,
+    ].join("\n");
+    const body = context.logs.map((log, index) => [`#${index + 1} ${log.time} ${log.title}`, log.data === undefined ? "" : stringifyLog(log.data)].filter(Boolean).join("\n")).join("\n\n---\n\n");
+    return [head, body || "暂无事件日志"].join("\n\n");
+}
+
+function formatAgentLogJson(context: AgentLogContext) {
+    const { logs, ...rest } = context;
+    return JSON.stringify({ context: rest, logs: logs.map(({ time, title, data }) => ({ time, title, data })) }, null, 2);
+}
+
+function stringifyLog(value: unknown) {
+    if (value === undefined) return "";
+    if (value instanceof Error) return value.message;
+    return typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
