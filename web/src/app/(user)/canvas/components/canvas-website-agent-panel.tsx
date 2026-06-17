@@ -8,10 +8,11 @@ import { nanoid } from "nanoid";
 
 import { requestToolResponse, type ResponseFunctionTool, type ResponseInputMessage, type ResponseToolCall } from "@/services/api/image";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { resolveImageSize, resolveVideoSize, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentWorkingMessage, type CanvasAgentChatMessage } from "./canvas-agent-chat-ui";
+import { NODE_DEFAULT_SIZE } from "../constants";
 import { CanvasNodeType, type CanvasNodeData } from "../types";
 import { summarizeCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 
@@ -19,13 +20,28 @@ const PANEL_MOTION_MS = 500;
 const PANEL_MOTION_SECONDS = PANEL_MOTION_MS / 1000;
 const ONLINE_AGENT_MAX_STEPS = 4;
 const ONLINE_AGENT_PROMPT =
-    "你是 Infinite Canvas 网页内置在线画布 Agent。当前画布 JSON 会随用户消息提供。首轮必须调用工具：只读问题调用 canvas_get_state，需要改动画布时调用 canvas_apply_ops 或 canvas_run_generation。不要输出 JSON 给用户，不要编造执行结果。工具参数涉及已有节点时必须使用当前画布 JSON 中真实存在的 id；缺少必要 id 或用户意图不明确时直接说明需要用户明确选择或说明，不要猜测。工具返回结果后，再根据真实结果回答用户。";
+    "你是 Infinite Canvas 网页内置在线画布 Agent。当前画布 JSON 会随用户消息提供。首轮必须调用工具：只读问题调用 canvas_get_state，需要生成内容时优先调用 canvas_generate_text、canvas_generate_image、canvas_generate_video、canvas_generate_audio 或 canvas_create_generation_flow；需要创建节点时调用 canvas_create_node / canvas_create_text_node / canvas_create_config_node；需要精确批量操作时调用 canvas_apply_ops。不要输出 JSON 给用户，不要编造执行结果。工具参数涉及已有节点时必须使用当前画布 JSON 中真实存在的 id；缺少必要 id 或用户意图不明确时直接说明需要用户明确选择或说明，不要猜测。工具返回结果后，再根据真实结果回答用户。";
 
 const JSON_RECORD_SCHEMA = { type: "object", additionalProperties: true };
 const POSITION_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"], additionalProperties: false };
 const VIEWPORT_SCHEMA = { type: "object", properties: { x: { type: "number" }, y: { type: "number" }, k: { type: "number" } }, required: ["x", "y", "k"], additionalProperties: false };
 const NODE_TYPE_SCHEMA = { type: "string", enum: ["image", "text", "config", "video", "audio"] };
 const GENERATION_MODE_SCHEMA = { type: "string", enum: ["text", "image", "video", "audio"] };
+const GENERATION_OPTION_PROPERTIES = {
+    model: { type: "string" },
+    size: { type: "string" },
+    quality: { type: "string" },
+    count: { type: "number" },
+    seconds: { type: "string" },
+    vquality: { type: "string" },
+    generateAudio: { type: "string" },
+    watermark: { type: "string" },
+    audioVoice: { type: "string" },
+    audioFormat: { type: "string" },
+    audioSpeed: { type: "string" },
+    audioInstructions: { type: "string" },
+};
+const REFERENCE_NODE_IDS_SCHEMA = { type: "array", items: { type: "string" } };
 const CANVAS_OP_SCHEMA = {
     type: "object",
     properties: {
@@ -55,6 +71,7 @@ const CANVAS_OP_SCHEMA = {
 const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
     toolDefinition("canvas_get_state", "读取当前网页画布的节点、连线、选区和视口。", {}),
     toolDefinition("canvas_get_selection", "读取当前网页画布选中的节点。", {}),
+    toolDefinition("canvas_export_snapshot", "导出当前画布快照，用于理解布局。", {}),
     toolDefinition(
         "canvas_apply_ops",
         "批量操作当前网页画布。ops 支持 add_node、update_node、delete_node、delete_connections、connect_nodes、set_viewport、select_nodes、run_generation。",
@@ -62,9 +79,84 @@ const ONLINE_AGENT_TOOLS: ResponseFunctionTool[] = [
         ["ops"],
         false,
     ),
+    toolDefinition(
+        "canvas_create_node",
+        "创建任意类型节点：text、image、config、video、audio。适合创建占位图、媒体占位、配置节点或自定义 metadata 节点。",
+        { nodeType: NODE_TYPE_SCHEMA, title: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" }, metadata: JSON_RECORD_SCHEMA },
+        ["nodeType"],
+    ),
+    toolDefinition("canvas_create_text_node", "在当前画布创建单个文本节点。", { text: { type: "string" }, x: { type: "number" }, y: { type: "number" }, title: { type: "string" }, width: { type: "number" }, height: { type: "number" } }, ["text"]),
+    toolDefinition(
+        "canvas_create_text_nodes",
+        "批量创建文本节点，适合生成标题、段落、脚本、说明等内容块。",
+        {
+            items: {
+                type: "array",
+                minItems: 1,
+                items: {
+                    type: "object",
+                    properties: { text: { type: "string" }, title: { type: "string" }, x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" } },
+                    required: ["text"],
+                    additionalProperties: false,
+                },
+            },
+            x: { type: "number" },
+            y: { type: "number" },
+            gap: { type: "number" },
+            direction: { type: "string", enum: ["row", "column"] },
+        },
+        ["items"],
+    ),
+    toolDefinition("canvas_create_config_node", "创建生成配置节点，可指定 text/image/video/audio 模式和生成参数，可选择立即触发生成。", {
+        id: { type: "string" },
+        prompt: { type: "string" },
+        mode: GENERATION_MODE_SCHEMA,
+        title: { type: "string" },
+        x: { type: "number" },
+        y: { type: "number" },
+        width: { type: "number" },
+        height: { type: "number" },
+        autoRun: { type: "boolean" },
+        ...GENERATION_OPTION_PROPERTIES,
+    }),
+    toolDefinition(
+        "canvas_create_image_prompt_flow",
+        "创建提示词文本节点和图片生成配置节点，并自动连线，可选择立即触发生图。",
+        { prompt: { type: "string" }, x: { type: "number" }, y: { type: "number" }, autoRun: { type: "boolean" }, referenceNodeIds: REFERENCE_NODE_IDS_SCHEMA, ...GENERATION_OPTION_PROPERTIES },
+        ["prompt"],
+    ),
+    generationToolDefinition("canvas_create_generation_flow", "创建通用生成流程：提示词文本节点、生成配置节点、参考节点连线，可用于文案、生图、视频或音频。"),
+    generationToolDefinition("canvas_generate_text", "创建文本生成流程并立即触发生成。", "text"),
+    generationToolDefinition("canvas_generate_image", "创建图片生成流程并立即触发生成。", "image"),
+    generationToolDefinition("canvas_generate_video", "创建视频生成流程并立即触发生成。", "video"),
+    generationToolDefinition("canvas_generate_audio", "创建音频生成流程并立即触发生成。", "audio"),
+    toolDefinition("canvas_update_node", "更新节点基础字段或 metadata。", { id: { type: "string" }, patch: JSON_RECORD_SCHEMA, metadata: JSON_RECORD_SCHEMA }, ["id"]),
+    toolDefinition("canvas_update_node_text", "更新文本节点内容和标题。", { id: { type: "string" }, text: { type: "string" }, title: { type: "string" } }, ["id", "text"]),
+    toolDefinition(
+        "canvas_move_nodes",
+        "移动一个或多个节点，支持绝对坐标或 dx/dy 偏移。",
+        {
+            items: {
+                type: "array",
+                minItems: 1,
+                items: { type: "object", properties: { id: { type: "string" }, x: { type: "number" }, y: { type: "number" }, dx: { type: "number" }, dy: { type: "number" } }, required: ["id"], additionalProperties: false },
+            },
+        },
+        ["items"],
+    ),
+    toolDefinition("canvas_resize_node", "调整节点尺寸。", { id: { type: "string" }, width: { type: "number" }, height: { type: "number" }, freeResize: { type: "boolean" } }, ["id", "width", "height"]),
+    toolDefinition("canvas_delete_nodes", "删除指定节点及相关连线。", { ids: { type: "array", items: { type: "string" }, minItems: 1 } }, ["ids"]),
+    toolDefinition(
+        "canvas_connect_nodes",
+        "批量连接节点。",
+        { connections: { type: "array", minItems: 1, items: { type: "object", properties: { fromNodeId: { type: "string" }, toNodeId: { type: "string" } }, required: ["fromNodeId", "toNodeId"], additionalProperties: false } } },
+        ["connections"],
+    ),
+    toolDefinition("canvas_select_nodes", "设置当前选中节点。", { ids: { type: "array", items: { type: "string" } } }, ["ids"]),
+    toolDefinition("canvas_set_viewport", "调整画布视口。", { viewport: VIEWPORT_SCHEMA }, ["viewport"]),
     toolDefinition("canvas_run_generation", "触发指定节点生成，通常用于配置节点或文本/图片/视频/音频节点。", { nodeId: { type: "string" }, mode: GENERATION_MODE_SCHEMA, prompt: { type: "string" } }, ["nodeId"]),
 ];
-const READ_TOOL_NAMES = new Set(["canvas_get_state", "canvas_get_selection"]);
+const READ_TOOL_NAMES = new Set(["canvas_get_state", "canvas_get_selection", "canvas_export_snapshot"]);
 
 type AgentTab = "chat" | "log";
 type AgentLog = { id: string; time: string; title: string; data?: unknown };
@@ -217,22 +309,23 @@ export function CanvasWebsiteAgentPanel({ snapshot, onApplyOps, onCollapse }: Ca
     const executeTool = (name: string, args: Record<string, unknown>): ToolResult => {
         const current = snapshotRef.current;
         if (name === "canvas_get_state") return { ok: true, message: describeCanvasSnapshot(current), data: compactSnapshot(current) };
+        if (name === "canvas_export_snapshot") return { ok: true, message: describeCanvasSnapshot(current), data: compactSnapshot(current) };
         if (name === "canvas_get_selection") {
             const ids = new Set(current.selectedNodeIds || []);
             return { ok: true, message: `当前选中 ${ids.size} 个节点。`, data: { nodes: compactSnapshot({ ...current, nodes: current.nodes.filter((node) => ids.has(node.id)) }).nodes } };
         }
-        if (name === "canvas_apply_ops") return executeOps(requireOps(args.ops));
-        if (name === "canvas_run_generation") return executeOps([{ type: "run_generation", nodeId: requireString(args.nodeId, "nodeId"), mode: generationMode(args.mode), prompt: stringOptional(args.prompt) }]);
-        return { ok: false, message: `不支持的工具：${name}` };
+        return executeOps(onlineToolToOps(name, args, current, effectiveConfig));
     };
 
     const executeOps = (ops: CanvasAgentOp[]): ToolResult => {
-        const before = snapshotSignature(snapshotRef.current);
+        const beforeSnapshot = snapshotRef.current;
+        const before = snapshotSignature(beforeSnapshot);
         const next = onApplyOps(ops);
         snapshotRef.current = next;
         const ranGeneration = ops.some((op) => op.type === "run_generation" && Boolean(op.nodeId));
         const changed = before !== snapshotSignature(next) || ranGeneration;
-        return { ok: changed, message: changed ? summarizeCanvasAgentOps(ops) || "画布操作已执行。" : "工具已执行，但画布状态没有变化。", data: { ops, before: JSON.parse(before), after: JSON.parse(snapshotSignature(next)) } };
+        const noopReason = changed ? "" : explainNoop(ops, beforeSnapshot);
+        return { ok: changed, message: changed ? summarizeCanvasAgentOps(ops) || "画布操作已执行。" : noopReason, data: { ops, before: JSON.parse(before), after: JSON.parse(snapshotSignature(next)) } };
     };
 
     const startResize = () => {
@@ -329,8 +422,219 @@ export function CanvasWebsiteAgentPanel({ snapshot, onApplyOps, onCollapse }: Ca
     );
 }
 
+function generationToolDefinition(name: string, description: string, mode?: "text" | "image" | "video" | "audio") {
+    return toolDefinition(
+        name,
+        description,
+        {
+            prompt: { type: "string" },
+            mode: mode ? undefined : GENERATION_MODE_SCHEMA,
+            x: { type: "number" },
+            y: { type: "number" },
+            title: { type: "string" },
+            autoRun: { type: "boolean" },
+            referenceNodeIds: REFERENCE_NODE_IDS_SCHEMA,
+            ...GENERATION_OPTION_PROPERTIES,
+        },
+        ["prompt"],
+    );
+}
+
 function toolDefinition(name: string, description: string, properties: Record<string, unknown>, required: string[] = [], strict = false): ResponseFunctionTool {
-    return { type: "function", function: { name, description, parameters: { type: "object", properties, required, additionalProperties: false }, strict } };
+    return { type: "function", function: { name, description, parameters: { type: "object", properties: cleanSchemaProperties(properties), required, additionalProperties: false }, strict } };
+}
+
+function cleanSchemaProperties(properties: Record<string, unknown>) {
+    return Object.fromEntries(Object.entries(properties).filter(([, value]) => value !== undefined));
+}
+
+function onlineToolToOps(name: string, input: Record<string, unknown>, snapshot: CanvasAgentSnapshot, config: AiConfig): CanvasAgentOp[] {
+    if (name === "canvas_apply_ops") return requireOps(input.ops);
+    if (name === "canvas_create_node") {
+        const nodeType = requireNodeType(input.nodeType);
+        const x = numberOr(input.x, nextCanvasX(snapshot));
+        const y = numberOr(input.y, 0);
+        if (nodeType === CanvasNodeType.Config) return [configNodeOp(stringOptional(input.id) || `config-${nanoid()}`, { ...recordOptional(input.metadata), ...input }, x, y, config)];
+        return [{ type: "add_node", nodeType, title: stringOptional(input.title), position: { x, y }, width: numberOptional(input.width), height: numberOptional(input.height), metadata: recordOptional(input.metadata) as CanvasNodeData["metadata"] }];
+    }
+    if (name === "canvas_create_text_node") return [textNodeOp(input, numberOr(input.x, nextCanvasX(snapshot)), numberOr(input.y, 0))];
+    if (name === "canvas_create_text_nodes") {
+        const items = requireRecordArray(input.items, "items");
+        const x = numberOr(input.x, nextCanvasX(snapshot));
+        const y = numberOr(input.y, 0);
+        const gap = numberOr(input.gap, 40);
+        const direction = input.direction === "row" ? "row" : "column";
+        return items.map((item, index) =>
+            textNodeOp(
+                { ...item, text: requireString(item.text, "text") },
+                numberOr(item.x, direction === "row" ? x + index * (NODE_DEFAULT_SIZE[CanvasNodeType.Text].width + gap) : x),
+                numberOr(item.y, direction === "row" ? y : y + index * (NODE_DEFAULT_SIZE[CanvasNodeType.Text].height + gap)),
+            ),
+        );
+    }
+    if (name === "canvas_create_image_prompt_flow") return generationFlowOps({ ...input, mode: "image" }, snapshot, config);
+    if (name === "canvas_create_config_node") {
+        const configId = stringOptional(input.id) || `config-${nanoid()}`;
+        const mode = generationMode(input.mode);
+        return [configNodeOp(configId, input, numberOr(input.x, nextCanvasX(snapshot)), numberOr(input.y, 0), config), ...(input.autoRun ? [runGenerationOp(configId, mode, stringOptional(input.prompt))] : [])];
+    }
+    if (name === "canvas_create_generation_flow") return generationFlowOps(input, snapshot, config);
+    if (name === "canvas_generate_text") return generationFlowOps({ ...input, mode: "text", autoRun: true }, snapshot, config);
+    if (name === "canvas_generate_image") return generationFlowOps({ ...input, mode: "image", autoRun: true }, snapshot, config);
+    if (name === "canvas_generate_video") return generationFlowOps({ ...input, mode: "video", autoRun: true }, snapshot, config);
+    if (name === "canvas_generate_audio") return generationFlowOps({ ...input, mode: "audio", autoRun: true }, snapshot, config);
+    if (name === "canvas_update_node") return [{ type: "update_node", id: requireString(input.id, "id"), patch: recordOptional(input.patch) as Partial<CanvasNodeData> | undefined, metadata: recordOptional(input.metadata) as CanvasNodeData["metadata"] }];
+    if (name === "canvas_update_node_text")
+        return [{ type: "update_node", id: requireString(input.id, "id"), patch: stringOptional(input.title) ? { title: stringOptional(input.title) } : undefined, metadata: { content: requireString(input.text, "text"), status: "success" } }];
+    if (name === "canvas_move_nodes") {
+        return requireRecordArray(input.items, "items").map((item) => {
+            const id = requireString(item.id, "id");
+            const current = snapshot.nodes.find((node) => node.id === id);
+            return { type: "update_node", id, patch: { position: { x: numberOr(item.x, (current?.position.x || 0) + numberOr(item.dx, 0)), y: numberOr(item.y, (current?.position.y || 0) + numberOr(item.dy, 0)) } } };
+        });
+    }
+    if (name === "canvas_resize_node")
+        return [
+            {
+                type: "update_node",
+                id: requireString(input.id, "id"),
+                patch: { width: requireNumber(input.width, "width"), height: requireNumber(input.height, "height") },
+                metadata: typeof input.freeResize === "boolean" ? { freeResize: input.freeResize } : undefined,
+            },
+        ];
+    if (name === "canvas_delete_nodes") return [{ type: "delete_node", ids: requireStringArray(input.ids, "ids") }];
+    if (name === "canvas_connect_nodes")
+        return requireRecordArray(input.connections, "connections").map((connection) => ({ type: "connect_nodes", fromNodeId: requireString(connection.fromNodeId, "fromNodeId"), toNodeId: requireString(connection.toNodeId, "toNodeId") }));
+    if (name === "canvas_select_nodes") return [{ type: "select_nodes", ids: requireStringArray(input.ids, "ids") }];
+    if (name === "canvas_set_viewport") return [{ type: "set_viewport", viewport: requireViewport(input.viewport) }];
+    if (name === "canvas_run_generation") return [runGenerationOp(requireString(input.nodeId, "nodeId"), generationMode(input.mode), stringOptional(input.prompt))];
+    throw new Error(`不支持的工具：${name}`);
+}
+
+function generationFlowOps(input: Record<string, unknown>, snapshot: CanvasAgentSnapshot, config: AiConfig): CanvasAgentOp[] {
+    const mode = generationMode(input.mode);
+    const prompt = requireString(input.prompt, "prompt");
+    const x = numberOr(input.x, nextCanvasX(snapshot));
+    const y = numberOr(input.y, 0);
+    const textId = `text-${nanoid()}`;
+    const configId = `config-${nanoid()}`;
+    const referenceNodeIds = Array.isArray(input.referenceNodeIds) ? input.referenceNodeIds.filter((id): id is string => typeof id === "string" && snapshot.nodes.some((node) => node.id === id)) : [];
+    const tokens = [`@[node:${textId}]`, ...referenceNodeIds.map((id) => `@[node:${id}]`)];
+    return [
+        textNodeOp({ id: textId, text: prompt, title: stringOptional(input.title) || "提示词" }, x, y),
+        configNodeOp(configId, { ...input, prompt: tokens.join("\n") }, x + NODE_DEFAULT_SIZE[CanvasNodeType.Text].width + 80, y, config),
+        { type: "connect_nodes", fromNodeId: textId, toNodeId: configId },
+        ...referenceNodeIds.map((fromNodeId) => ({ type: "connect_nodes" as const, fromNodeId, toNodeId: configId })),
+        { type: "select_nodes", ids: [configId] },
+        ...(input.autoRun ? [runGenerationOp(configId, mode, tokens.join("\n"))] : []),
+    ];
+}
+
+function textNodeOp(input: Record<string, unknown>, x: number, y: number): CanvasAgentOp {
+    return {
+        type: "add_node",
+        id: stringOptional(input.id),
+        nodeType: CanvasNodeType.Text,
+        title: stringOptional(input.title),
+        position: { x, y },
+        width: numberOptional(input.width),
+        height: numberOptional(input.height),
+        metadata: { content: stringOptional(input.text), status: "success", fontSize: 14 },
+    };
+}
+
+function configNodeOp(id: string, input: Record<string, unknown>, x: number, y: number, config: AiConfig): CanvasAgentOp {
+    const mode = generationMode(input.mode);
+    const prompt = stringOptional(input.prompt);
+    return {
+        type: "add_node",
+        id,
+        nodeType: CanvasNodeType.Config,
+        title: stringOptional(input.title) || generationTitle(mode),
+        position: { x, y },
+        width: numberOptional(input.width),
+        height: numberOptional(input.height),
+        metadata: cleanRecord({
+            generationMode: mode,
+            composerContent: prompt,
+            prompt,
+            status: "idle",
+            model: resolveGenerationModel(config, mode, stringOptional(input.model)),
+            size: stringOptional(input.size) || defaultGenerationSize(config, mode),
+            quality: stringOptional(input.quality) || config.quality,
+            count: numberOptional(input.count) ?? generationCount(mode === "image" ? config.canvasImageCount || config.count : config.count),
+            seconds: stringOptional(input.seconds) || config.videoSeconds,
+            vquality: stringOptional(input.vquality) || config.vquality,
+            generateAudio: stringOptional(input.generateAudio) || config.videoGenerateAudio,
+            watermark: stringOptional(input.watermark) || config.videoWatermark,
+            audioVoice: stringOptional(input.audioVoice) || config.audioVoice,
+            audioFormat: stringOptional(input.audioFormat) || config.audioFormat,
+            audioSpeed: stringOptional(input.audioSpeed) || config.audioSpeed,
+            audioInstructions: stringOptional(input.audioInstructions) || config.audioInstructions,
+        }) as CanvasNodeData["metadata"],
+    };
+}
+
+function runGenerationOp(nodeId: string, mode: "text" | "image" | "video" | "audio", prompt?: string): CanvasAgentOp {
+    return { type: "run_generation", nodeId, mode, prompt };
+}
+
+function defaultGenerationSize(config: AiConfig, mode: "text" | "image" | "video" | "audio") {
+    if (mode === "image") return resolveImageSize(config);
+    if (mode === "video") return resolveVideoSize(config);
+    return config.size;
+}
+
+function defaultGenerationModel(config: AiConfig, mode: "text" | "image" | "video" | "audio") {
+    if (mode === "image") return config.imageModel || config.model;
+    if (mode === "video") return config.videoModel || config.model;
+    if (mode === "audio") return config.audioModel || config.model;
+    return config.textModel || config.model;
+}
+
+function resolveGenerationModel(config: AiConfig, mode: "text" | "image" | "video" | "audio", model?: string) {
+    const models = selectableModelsByCapability(config, mode);
+    const requested = (model || "").trim();
+    return requested && (!models.length || models.includes(requested)) ? requested : defaultGenerationModel(config, mode);
+}
+
+function generationTitle(mode: "text" | "image" | "video" | "audio") {
+    if (mode === "text") return "文本生成";
+    if (mode === "video") return "视频生成";
+    if (mode === "audio") return "音频生成";
+    return "图片生成";
+}
+
+function generationCount(value: string) {
+    return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(value)) || 1)));
+}
+
+function cleanRecord(value: Record<string, unknown>) {
+    return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined && item !== ""));
+}
+
+function explainNoop(ops: CanvasAgentOp[], snapshot: CanvasAgentSnapshot) {
+    if (!ops.length) return "模型没有返回可执行的画布操作。";
+    const nodeIds = new Set(snapshot.nodes.map((node) => node.id));
+    const connectionIds = new Set(snapshot.connections.map((conn) => conn.id));
+    const deleteConnectionOps = ops.filter((op): op is Extract<CanvasAgentOp, { type: "delete_connections" }> => op.type === "delete_connections");
+    const connectOps = ops.filter((op): op is Extract<CanvasAgentOp, { type: "connect_nodes" }> => op.type === "connect_nodes");
+    const deleteNodeOps = ops.filter((op): op is Extract<CanvasAgentOp, { type: "delete_node" }> => op.type === "delete_node");
+    const updateOps = ops.filter((op): op is Extract<CanvasAgentOp, { type: "update_node" }> => op.type === "update_node");
+    const selectOps = ops.filter((op): op is Extract<CanvasAgentOp, { type: "select_nodes" }> => op.type === "select_nodes");
+    const generationOps = ops.filter((op): op is Extract<CanvasAgentOp, { type: "run_generation" }> => op.type === "run_generation");
+    if (deleteConnectionOps.length && !snapshot.connections.length) return "画布当前没有连线可删除。";
+    if (deleteConnectionOps.length && deleteConnectionOps.every((op) => !op.all && [...(op.ids || []), ...(op.id ? [op.id] : [])].every((id) => !connectionIds.has(id)))) return "没有找到要删除的连线。";
+    if (connectOps.length && connectOps.every((op) => snapshot.connections.some((conn) => conn.fromNodeId === op.fromNodeId && conn.toNodeId === op.toNodeId))) return "这些节点已经存在对应连线，无需重复连接。";
+    if (connectOps.length && connectOps.every((op) => !nodeIds.has(op.fromNodeId) || !nodeIds.has(op.toNodeId))) return "没有找到要连接的节点。";
+    if (deleteNodeOps.length && deleteNodeOps.every((op) => op.nodeType === CanvasNodeType.Config) && !snapshot.nodes.some((node) => node.type === CanvasNodeType.Config)) return "画布当前没有生成配置节点可删除。";
+    if (deleteNodeOps.length && deleteNodeOps.every((op) => [...(op.ids || []), ...(op.id ? [op.id] : [])].every((id) => !nodeIds.has(id)))) return "没有找到要删除的节点。";
+    if (updateOps.length && updateOps.every((op) => !nodeIds.has(op.id))) return "没有找到要更新的节点。";
+    if (selectOps.length && selectOps.every((op) => !(op.ids || []).some((id) => nodeIds.has(id)))) return "没有找到要选择的节点。";
+    if (generationOps.length && generationOps.every((op) => !nodeIds.has(op.nodeId))) return "没有找到要触发生成的节点。";
+    if (ops.every((op) => op.type === "set_viewport")) return "视图已经是目标状态。";
+    if (selectOps.length && selectOps.every((op) => JSON.stringify(op.ids || []) === JSON.stringify(snapshot.selectedNodeIds))) return "选区已经是目标状态。";
+    return "工具已执行，但画布状态没有变化；请在日志 tab 查看工具参数和执行前后状态。";
 }
 
 function buildAgentMessages(snapshot: CanvasAgentSnapshot, history: CanvasAgentChatMessage[], userText: string): ResponseInputMessage[] {
@@ -432,6 +736,15 @@ function requireStringArray(value: unknown, field: string): string[] {
     return value as string[];
 }
 
+function requireRecordArray(value: unknown, field: string): Record<string, unknown>[] {
+    if (!Array.isArray(value)) throw new Error(`${field} 必须是数组`);
+    return value.map((item) => {
+        const record = objectDetail(item);
+        if (!Object.keys(record).length) throw new Error(`${field} 必须只包含对象`);
+        return record;
+    });
+}
+
 function requireString(value: unknown, field: string) {
     if (typeof value !== "string" || !value) throw new Error(`${field} 必须是非空字符串`);
     return value;
@@ -462,6 +775,14 @@ function stringOptional(value: unknown) {
 
 function numberOptional(value: unknown) {
     return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function numberOr(value: unknown, fallback: number) {
+    return numberOptional(value) ?? fallback;
+}
+
+function nextCanvasX(snapshot: CanvasAgentSnapshot) {
+    return snapshot.nodes.length ? Math.max(...snapshot.nodes.map((node) => node.position.x + node.width)) + 80 : 0;
 }
 
 function generationMode(value: unknown): "text" | "image" | "video" | "audio" {
