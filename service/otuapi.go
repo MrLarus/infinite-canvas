@@ -67,6 +67,7 @@ type otuapiResponseTool struct {
 type otuapiChatMessage struct {
 	Role       string              `json:"role"`
 	Content    any                 `json:"content,omitempty"`
+	Name       string              `json:"name,omitempty"`
 	ToolCallID string              `json:"tool_call_id,omitempty"`
 	ToolCalls  []otuapiChatToolCall `json:"tool_calls,omitempty"`
 }
@@ -319,9 +320,14 @@ func isTimeoutError(err error) bool {
 
 func otuapiChatRequestFromResponses(request otuapiResponsesRequest) (otuapiChatRequest, error) {
 	messages := make([]otuapiChatMessage, 0, len(request.Input))
+	toolCallNames := map[string]string{}
+	includeToolMessageName := otuapiChatToolMessageNeedsName(request.Model)
 	for _, item := range request.Input {
 		switch {
 		case item.Type == "function_call":
+			if item.CallID != "" && item.Name != "" {
+				toolCallNames[item.CallID] = item.Name
+			}
 			messages = append(messages, otuapiChatMessage{
 				Role: "assistant",
 				ToolCalls: []otuapiChatToolCall{{
@@ -342,7 +348,14 @@ func otuapiChatRequestFromResponses(request otuapiResponsesRequest) (otuapiChatR
 			if toolCallID == "" {
 				toolCallID = item.ToolCallID
 			}
-			messages = append(messages, otuapiChatMessage{Role: "tool", ToolCallID: toolCallID, Content: output})
+			name := item.Name
+			if name == "" {
+				name = toolCallNames[toolCallID]
+			}
+			if !includeToolMessageName {
+				name = ""
+			}
+			messages = append(messages, otuapiChatMessage{Role: "tool", Name: name, ToolCallID: toolCallID, Content: output})
 		case item.Role != "":
 			messages = append(messages, otuapiChatMessage{Role: item.Role, Content: otuapiChatContent(item.Content)})
 		}
@@ -375,6 +388,10 @@ func otuapiChatRequestFromResponses(request otuapiResponsesRequest) (otuapiChatR
 		return chat, safeMessageError{message: "缺少对话内容"}
 	}
 	return chat, nil
+}
+
+func otuapiChatToolMessageNeedsName(modelName string) bool {
+	return strings.Contains(strings.ToLower(strings.TrimSpace(modelName)), "gemini")
 }
 
 func otuapiChatContent(content any) any {

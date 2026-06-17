@@ -167,23 +167,62 @@ func TestOtuapiResponsesAllowsGemini35FlashToolCalls(t *testing.T) {
 	}
 }
 
-func TestOtuapiChatRequestUsesToolCallIDForToolMessages(t *testing.T) {
+func TestOtuapiChatRequestUsesToolCallIDAndNameForToolMessages(t *testing.T) {
 	request, err := otuapiChatRequestFromResponses(otuapiResponsesRequest{
 		Model: "gemini-3.5-flash",
-		Input: []otuapiResponseInput{{
-			Role:       "tool",
-			ToolCallID: "call_123",
-			Content:    "ok",
-		}},
+		Input: []otuapiResponseInput{
+			{
+				Type:      "function_call",
+				CallID:    "call_123",
+				Name:      "canvas_get_state",
+				Arguments: "{}",
+			},
+			{
+				Type:   "function_call_output",
+				CallID: "call_123",
+				Output: "ok",
+			},
+			{
+				Role:       "tool",
+				Name:       "canvas_get_selection",
+				ToolCallID: "call_456",
+				Content:    "ok",
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("build chat request: %v", err)
 	}
-	if len(request.Messages) != 1 {
+	if len(request.Messages) != 3 {
 		t.Fatalf("messages = %#v", request.Messages)
 	}
-	if request.Messages[0].ToolCallID != "call_123" {
-		t.Fatalf("tool_call_id = %q, want call_123", request.Messages[0].ToolCallID)
+	if request.Messages[1].ToolCallID != "call_123" {
+		t.Fatalf("tool_call_id = %q, want call_123", request.Messages[1].ToolCallID)
+	}
+	if request.Messages[1].Name != "canvas_get_state" {
+		t.Fatalf("tool name = %q, want canvas_get_state", request.Messages[1].Name)
+	}
+	if request.Messages[2].ToolCallID != "call_456" {
+		t.Fatalf("tool_call_id = %q, want call_456", request.Messages[2].ToolCallID)
+	}
+	if request.Messages[2].Name != "canvas_get_selection" {
+		t.Fatalf("tool name = %q, want canvas_get_selection", request.Messages[2].Name)
+	}
+}
+
+func TestOtuapiChatRequestOmitsToolMessageNameForOpenAICompatibleModels(t *testing.T) {
+	request, err := otuapiChatRequestFromResponses(otuapiResponsesRequest{
+		Model: "claude-opus-4-6",
+		Input: []otuapiResponseInput{
+			{Type: "function_call", CallID: "call_123", Name: "canvas_get_state", Arguments: "{}"},
+			{Type: "function_call_output", CallID: "call_123", Output: "ok"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("build chat request: %v", err)
+	}
+	if request.Messages[1].Name != "" {
+		t.Fatalf("tool name = %q, want empty", request.Messages[1].Name)
 	}
 }
 
