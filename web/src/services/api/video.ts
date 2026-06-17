@@ -353,12 +353,18 @@ function isOtuapiVideoModel(model: string) {
 }
 
 async function buildOtuapiVideoPayload(config: AiConfig, model: string, prompt: string, references: ReferenceImage[]) {
-    const size = normalizeVideoSize(config.size);
+    const size = otuapiVideoSizeParam(model, config.size);
     const payload: Record<string, unknown> = { model, prompt };
     if (size) payload.size = size;
     const images = await Promise.all(references.slice(0, 7).map((image) => resolveOtuapiImageReference(config, image)));
     if (images.length) payload.images = images;
     return payload;
+}
+
+function otuapiVideoSizeParam(model: string, value: string) {
+    const size = normalizeVideoSize(value);
+    if (size) return size;
+    return model.trim().toLowerCase().includes("sora") ? "1280x720" : null;
 }
 
 async function resolveOtuapiImageReference(config: AiConfig, image: ReferenceImage) {
