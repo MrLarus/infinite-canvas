@@ -135,6 +135,11 @@ type otuapiResponsePayload struct {
 	} `json:"error,omitempty"`
 }
 
+type safeOtuapiModelError struct {
+	model   string
+	message string
+}
+
 func IsOtuapiChannel(channel model.ModelChannel) bool {
 	if strings.EqualFold(strings.TrimSpace(channel.Protocol), "otuapi") {
 		return true
@@ -419,6 +424,10 @@ func otuapiResponsesPayloadFromChat(body []byte, fallbackModel string) (otuapiRe
 	}
 	output := []map[string]interface{}{}
 	outputText := ""
+	modelName := chat.Model
+	if modelName == "" {
+		modelName = fallbackModel
+	}
 	if len(chat.Choices) > 0 {
 		message := chat.Choices[0].Message
 		outputText = otuapiContentText(message.Content)
@@ -437,10 +446,15 @@ func otuapiResponsesPayloadFromChat(body []byte, fallbackModel string) (otuapiRe
 				"arguments": call.Function.Arguments,
 			})
 		}
+		if outputText == "" && len(message.ToolCalls) == 0 {
+			if strings.EqualFold(chat.Choices[0].FinishReason, "content_filter") {
+				return otuapiResponsePayload{}, "", safeOtuapiModelError{model: modelName, message: "模型返回 content_filter，未给出工具调用或文本内容"}
+			}
+			return otuapiResponsePayload{}, "", safeOtuapiModelError{model: modelName, message: "模型没有返回工具调用或文本内容"}
+		}
 	}
-	modelName := chat.Model
-	if modelName == "" {
-		modelName = fallbackModel
+	if len(chat.Choices) == 0 {
+		return otuapiResponsePayload{}, "", safeOtuapiModelError{model: modelName, message: "模型没有返回 choices"}
 	}
 	return otuapiResponsePayload{ID: chat.ID, Object: "response", Model: modelName, Output: output, OutputText: outputText}, outputText, nil
 }
@@ -492,13 +506,23 @@ func otuapiResponsesToolUnsupportedMessage(model string, hasTools bool) string {
 		return ""
 	}
 	switch model {
-	case "gemini-3.5-flash":
-		return "章鱼哥 gemini-3.5-flash 普通聊天已改走 Gemini 原生接口，但网站 Agent 工具调用在章鱼哥上游超时；请将网站 Agent 文本模型切换为 claude-opus-4-6"
 	case "gemini-3.1-pro-preview", "gpt-4o":
 		return "该章鱼哥文本模型本次实测长时间无响应，不适合网站 Agent 工具调用；请切换为 claude-opus-4-6"
 	default:
 		return ""
 	}
+}
+
+func (err safeOtuapiModelError) Error() string {
+	return err.SafeMessage()
+}
+
+func (err safeOtuapiModelError) SafeMessage() string {
+	model := strings.TrimSpace(err.model)
+	if model == "" {
+		model = "当前模型"
+	}
+	return "章鱼哥 " + model + " 不适合当前网站 Agent 工具调用：" + err.message + "。请切换 claude-opus-4-6，或在普通文本对话中使用该模型。"
 }
 
 func otuapiNormalizeVideoJSONBody(model string, body []byte) ([]byte, bool) {

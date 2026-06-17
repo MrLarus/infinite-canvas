@@ -109,7 +109,7 @@ func TestOtuapiUsesGeminiNativeChatOnlyForKnownWorkingTextModel(t *testing.T) {
 
 func TestOtuapiResponsesRejectsKnownUnstableToolModels(t *testing.T) {
 	body, _ := json.Marshal(map[string]any{
-		"model": "gemini-3.5-flash",
+		"model": "gemini-3.1-pro-preview",
 		"input": []map[string]any{{"role": "user", "content": "read state"}},
 		"tools": []map[string]any{{
 			"type": "function",
@@ -124,5 +124,62 @@ func TestOtuapiResponsesRejectsKnownUnstableToolModels(t *testing.T) {
 	}, body)
 	if err == nil || !strings.Contains(err.Error(), "claude-opus-4-6") {
 		t.Fatalf("expected explicit model guidance, got %v", err)
+	}
+}
+
+func TestOtuapiResponsesAllowsGemini35FlashToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request otuapiChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.Model != "gemini-3.5-flash" || len(request.Tools) != 1 {
+			t.Fatalf("unexpected request = %#v", request)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-test","model":"gemini-3.5-flash","choices":[{"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"canvas_get_state","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`))
+	}))
+	defer server.Close()
+
+	body, _ := json.Marshal(map[string]any{
+		"model": "gemini-3.5-flash",
+		"input": []map[string]any{{"role": "user", "content": "read state"}},
+		"tools": []map[string]any{{
+			"type": "function",
+			"name": "canvas_get_state",
+			"parameters": map[string]any{"type": "object", "properties": map[string]any{}},
+		}},
+	})
+	responseBody, _, err := otuapiResponsesViaChatCompletions(model.ModelChannel{
+		Protocol: "otuapi",
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+	}, body)
+	if err != nil {
+		t.Fatalf("gemini-3.5-flash tool call should be converted: %v", err)
+	}
+	var payload otuapiResponsePayload
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		t.Fatalf("decode response payload: %v", err)
+	}
+	if len(payload.Output) != 1 || payload.Output[0]["name"] != "canvas_get_state" {
+		t.Fatalf("unexpected output = %#v", payload.Output)
+	}
+}
+
+func TestOtuapiResponsesRejectsEmptyContentFilteredOutput(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-test","model":"claude-opus-4-6","choices":[{"message":{"role":"assistant","content":""},"finish_reason":"content_filter"}]}`))
+	}))
+	defer server.Close()
+
+	_, _, err := otuapiResponsesViaChatCompletions(model.ModelChannel{
+		Protocol: "otuapi",
+		BaseURL:  server.URL,
+		APIKey:   "test-key",
+	}, []byte(`{"model":"claude-opus-4-6","input":[{"role":"user","content":"hi"}],"tools":[]}`))
+	if err == nil || !strings.Contains(err.Error(), "content_filter") {
+		t.Fatalf("expected content_filter guidance, got %v", err)
 	}
 }
