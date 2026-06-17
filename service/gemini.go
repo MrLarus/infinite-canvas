@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,9 +17,11 @@ import (
 var geminiGenerateHTTPClient = &http.Client{Timeout: 65 * time.Second}
 
 type GeminiPart struct {
-	Text       string             `json:"text,omitempty"`
-	InlineData *GeminiInlineData `json:"inlineData,omitempty"`
-	ImageURL   *struct {
+	Text             string                  `json:"text,omitempty"`
+	InlineData       *GeminiInlineData      `json:"inlineData,omitempty"`
+	FunctionCall     *GeminiFunctionCall    `json:"functionCall,omitempty"`
+	FunctionResponse *GeminiFunctionResponse `json:"function_response,omitempty"`
+	ImageURL         *struct {
 		URL string `json:"url,omitempty"`
 	} `json:"image_url,omitempty"`
 }
@@ -26,6 +29,16 @@ type GeminiPart struct {
 type GeminiInlineData struct {
 	MimeType string `json:"mimeType,omitempty"`
 	Data     string `json:"data,omitempty"`
+}
+
+type GeminiFunctionCall struct {
+	Name string                 `json:"name,omitempty"`
+	Args map[string]interface{} `json:"args,omitempty"`
+}
+
+type GeminiFunctionResponse struct {
+	Name     string                 `json:"name,omitempty"`
+	Response map[string]interface{} `json:"response,omitempty"`
 }
 
 type GeminiContent struct {
@@ -36,7 +49,28 @@ type GeminiContent struct {
 type GeminiGenerateRequest struct {
 	Contents          []GeminiContent        `json:"contents"`
 	SystemInstruction *GeminiContent         `json:"systemInstruction,omitempty"`
+	Tools             []GeminiTool           `json:"tools,omitempty"`
+	ToolConfig        *GeminiToolConfig      `json:"toolConfig,omitempty"`
 	GenerationConfig  map[string]interface{} `json:"generationConfig,omitempty"`
+}
+
+type GeminiTool struct {
+	FunctionDeclarations []GeminiFunctionDeclaration `json:"functionDeclarations,omitempty"`
+}
+
+type GeminiFunctionDeclaration struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty"`
+}
+
+type GeminiToolConfig struct {
+	FunctionCallingConfig *GeminiFunctionCallingConfig `json:"functionCallingConfig,omitempty"`
+}
+
+type GeminiFunctionCallingConfig struct {
+	Mode                 string   `json:"mode,omitempty"`
+	AllowedFunctionNames []string `json:"allowedFunctionNames,omitempty"`
 }
 
 type GeminiGenerateResponse struct {
@@ -54,6 +88,37 @@ type GeminiGenerateResponse struct {
 type OpenAIChatMessage struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
+}
+
+func GeminiResponsesViaGenerateContent(channel model.ModelChannel, body []byte) ([]byte, string, error) {
+	var responsesRequest otuapiResponsesRequest
+	if err := json.Unmarshal(body, &responsesRequest); err != nil {
+		return nil, "", safeMessageError{message: "Responses 请求解析失败"}
+	}
+	geminiRequest, err := geminiGenerateRequestFromResponses(responsesRequest)
+	if err != nil {
+		return nil, "", err
+	}
+	requestBody, _ := json.Marshal(geminiRequest)
+	responseBody, err := doGeminiGenerate(channel, responsesRequest.Model, requestBody)
+	if err != nil {
+		return nil, "", err
+	}
+	geminiPayload, err := parseGeminiPayload(responseBody)
+	if err != nil {
+		return nil, "", err
+	}
+	payload, content, err := geminiResponsesPayloadFromGenerate(geminiPayload, responsesRequest.Model)
+	if err != nil {
+		return nil, "", err
+	}
+	if responsesRequest.Stream {
+		event, _ := json.Marshal(map[string]interface{}{"type": "response.output_text.done", "text": content})
+		completed, _ := json.Marshal(map[string]interface{}{"type": "response.completed", "response": payload})
+		return []byte("data: " + string(event) + "\n\ndata: " + string(completed) + "\n\ndata: [DONE]\n\n"), "text/event-stream", nil
+	}
+	encoded, _ := json.Marshal(payload)
+	return encoded, "application/json", nil
 }
 
 func IsGeminiChannel(channel model.ModelChannel) bool {
@@ -306,6 +371,156 @@ func geminiBodyFromChatMessages(messages []OpenAIChatMessage) ([]byte, error) {
 	return json.Marshal(request)
 }
 
+func geminiGenerateRequestFromResponses(request otuapiResponsesRequest) (GeminiGenerateRequest, error) {
+	contents := []GeminiContent{}
+	systemParts := []GeminiPart{}
+	toolCallNames := map[string]string{}
+	for _, item := range request.Input {
+		switch {
+		case item.Type == "function_call":
+			args := map[string]interface{}{}
+			if strings.TrimSpace(item.Arguments) != "" {
+				_ = json.Unmarshal([]byte(item.Arguments), &args)
+			}
+			toolCallNames[item.CallID] = item.Name
+			contents = append(contents, GeminiContent{
+				Role:  "model",
+				Parts: []GeminiPart{{FunctionCall: &GeminiFunctionCall{Name: item.Name, Args: args}}},
+			})
+		case item.Type == "function_call_output" || item.Role == "tool":
+			toolCallID := item.CallID
+			if toolCallID == "" {
+				toolCallID = item.ToolCallID
+			}
+			name := item.Name
+			if name == "" {
+				name = toolCallNames[toolCallID]
+			}
+			response := geminiFunctionResponsePayload(item.Output, item.Content)
+			contents = append(contents, GeminiContent{
+				Role:  "user",
+				Parts: []GeminiPart{{FunctionResponse: &GeminiFunctionResponse{Name: name, Response: response}}},
+			})
+		case item.Role != "":
+			parts, err := geminiPartsFromResponsesContent(item.Content)
+			if err != nil {
+				return GeminiGenerateRequest{}, err
+			}
+			role := strings.ToLower(strings.TrimSpace(item.Role))
+			if role == "system" {
+				systemParts = append(systemParts, parts...)
+				continue
+			}
+			if role == "assistant" {
+				role = "model"
+			} else {
+				role = "user"
+			}
+			contents = append(contents, GeminiContent{Role: role, Parts: parts})
+		}
+	}
+	result := GeminiGenerateRequest{
+		Contents: contents,
+		Tools:    geminiToolsFromResponses(request.Tools),
+	}
+	if len(systemParts) > 0 {
+		result.SystemInstruction = &GeminiContent{Parts: systemParts}
+	}
+	if len(result.Tools) > 0 {
+		result.ToolConfig = geminiToolConfigFromResponses(request.ToolChoice, request.Tools)
+	}
+	if strings.TrimSpace(request.Model) == "" {
+		return result, safeMessageError{message: "缺少模型名称"}
+	}
+	if len(result.Contents) == 0 {
+		return result, safeMessageError{message: "缺少对话内容"}
+	}
+	return result, nil
+}
+
+func geminiPartsFromResponsesContent(content any) ([]GeminiPart, error) {
+	if items, ok := content.([]interface{}); ok {
+		parts := []GeminiPart{}
+		for _, raw := range items {
+			item, ok := raw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			switch item["type"] {
+			case "input_text", "text":
+				parts = append(parts, GeminiPart{Text: stringValue(item["text"])})
+			case "input_image", "image_url":
+				imageURL := stringValue(item["image_url"])
+				if imageURL == "" {
+					if nested, ok := item["image_url"].(map[string]interface{}); ok {
+						imageURL = stringValue(nested["url"])
+					}
+				}
+				inline, err := geminiInlineDataFromURL(imageURL)
+				if err != nil {
+					return nil, err
+				}
+				parts = append(parts, GeminiPart{InlineData: inline})
+			}
+		}
+		if len(parts) > 0 {
+			return parts, nil
+		}
+	}
+	return []GeminiPart{{Text: stringValue(content)}}, nil
+}
+
+func geminiFunctionResponsePayload(output string, content any) map[string]interface{} {
+	text := output
+	if text == "" {
+		text = stringValue(content)
+	}
+	result := map[string]interface{}{}
+	if strings.TrimSpace(text) != "" && json.Unmarshal([]byte(text), &result) == nil && len(result) > 0 {
+		return result
+	}
+	return map[string]interface{}{"output": text}
+}
+
+func geminiToolsFromResponses(tools []otuapiResponseTool) []GeminiTool {
+	declarations := []GeminiFunctionDeclaration{}
+	for _, tool := range tools {
+		name := tool.Name
+		description := tool.Description
+		parameters := tool.Parameters
+		if name == "" && tool.Function != nil {
+			name = tool.Function.Name
+			description = tool.Function.Description
+			parameters = tool.Function.Parameters
+		}
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		declarations = append(declarations, GeminiFunctionDeclaration{Name: name, Description: description, Parameters: parameters})
+	}
+	if len(declarations) == 0 {
+		return nil
+	}
+	return []GeminiTool{{FunctionDeclarations: declarations}}
+}
+
+func geminiToolConfigFromResponses(toolChoice any, tools []otuapiResponseTool) *GeminiToolConfig {
+	config := &GeminiToolConfig{FunctionCallingConfig: &GeminiFunctionCallingConfig{Mode: "AUTO"}}
+	if text, ok := toolChoice.(string); ok && text == "required" {
+		config.FunctionCallingConfig.Mode = "ANY"
+		return config
+	}
+	if item, ok := toolChoice.(map[string]interface{}); ok && item["type"] == "function" {
+		if name := stringValue(item["name"]); name != "" {
+			config.FunctionCallingConfig.Mode = "ANY"
+			config.FunctionCallingConfig.AllowedFunctionNames = []string{name}
+			return config
+		}
+	}
+	_ = tools
+	return config
+}
+
 func geminiPartsFromOpenAIContent(raw json.RawMessage) ([]GeminiPart, error) {
 	var text string
 	if err := json.Unmarshal(raw, &text); err == nil {
@@ -408,6 +623,43 @@ func geminiText(payload GeminiGenerateResponse) string {
 		}
 	}
 	return strings.Join(texts, "")
+}
+
+func geminiResponsesPayloadFromGenerate(payload GeminiGenerateResponse, fallbackModel string) (otuapiResponsePayload, string, error) {
+	output := []map[string]interface{}{}
+	outputText := ""
+	callIndex := 0
+	for _, part := range geminiParts(payload) {
+		if strings.TrimSpace(part.Text) != "" {
+			outputText += part.Text
+		}
+		if part.FunctionCall != nil && strings.TrimSpace(part.FunctionCall.Name) != "" {
+			callIndex++
+			arguments := "{}"
+			if part.FunctionCall.Args != nil {
+				encoded, _ := json.Marshal(part.FunctionCall.Args)
+				arguments = string(encoded)
+			}
+			callID := "call_" + part.FunctionCall.Name + "_" + strconv.Itoa(callIndex)
+			output = append(output, map[string]interface{}{
+				"type":      "function_call",
+				"id":        callID,
+				"call_id":   callID,
+				"name":      part.FunctionCall.Name,
+				"arguments": arguments,
+			})
+		}
+	}
+	if outputText != "" {
+		output = append([]map[string]interface{}{{
+			"type":    "message",
+			"content": []map[string]string{{"type": "output_text", "text": outputText}},
+		}}, output...)
+	}
+	if len(output) == 0 {
+		return otuapiResponsePayload{}, "", safeOtuapiModelError{model: fallbackModel, message: "模型没有返回工具调用或文本内容"}
+	}
+	return otuapiResponsePayload{Object: "response", Model: fallbackModel, Output: output, OutputText: outputText}, outputText, nil
 }
 
 func geminiFirstImage(payload GeminiGenerateResponse) (map[string]string, error) {

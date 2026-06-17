@@ -95,6 +95,14 @@ func TestBuildModelChannelURLNormalizesArkPlanTaskPath(t *testing.T) {
 	}
 }
 
+func TestBuildModelChannelURLKeepsGLMPaasV4Base(t *testing.T) {
+	got := BuildModelChannelURL(model.ModelChannel{BaseURL: "https://open.bigmodel.cn/api/paas/v4"}, "/chat/completions")
+	want := "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+	if got != want {
+		t.Fatalf("BuildModelChannelURL = %q, want %q", got, want)
+	}
+}
+
 func TestNormalizeSettingsPublishesEnabledChannelModelsAndRepairsDefaults(t *testing.T) {
 	settings := normalizeSettings(model.Settings{
 		Public: model.PublicSetting{

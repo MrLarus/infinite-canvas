@@ -119,6 +119,25 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		_, _ = w.Write(result.Body)
 		return
 	}
+	if path == "/responses" && !service.IsGeminiChannel(channel) {
+		if err := service.ConsumeUserCredits(user.ID, modelName, credits, path); err != nil {
+			FailError(w, err)
+			return
+		}
+		responseBody, responseType, err := service.OpenAICompatibleResponsesViaChatCompletions(channel, body)
+		if err != nil {
+			if refundErr := service.RefundUserCredits(user.ID, modelName, credits, path); refundErr != nil {
+				log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, refundErr)
+			}
+			FailError(w, err)
+			return
+		}
+		if responseType != "" {
+			w.Header().Set("Content-Type", responseType)
+		}
+		_, _ = w.Write(responseBody)
+		return
+	}
 	path = service.OtuapiProxyPath(channel, modelName, path)
 	body, contentType = service.OtuapiNormalizeJSONRequest(channel, modelName, path, body, contentType)
 	body, contentType = service.OtuapiNormalizeFormRequest(channel, modelName, path, body, contentType)

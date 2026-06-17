@@ -162,6 +162,11 @@ func OtuapiProxyRequest(channel model.ModelChannel, path string, body []byte, co
 		return OtuapiProxyResult{}
 	}
 	if path == "/responses" {
+		var preview otuapiResponsesRequest
+		if err := json.Unmarshal(body, &preview); err == nil && otuapiGeminiNativeChatModel(strings.ToLower(strings.TrimSpace(preview.Model))) {
+			responseBody, responseType, err := GeminiResponsesViaGenerateContent(channel, body)
+			return OtuapiProxyResult{Handled: true, Body: responseBody, ContentType: responseType, Err: err}
+		}
 		responseBody, responseType, err := otuapiResponsesViaChatCompletions(channel, body)
 		return OtuapiProxyResult{Handled: true, Body: responseBody, ContentType: responseType, Err: err}
 	}
@@ -262,6 +267,47 @@ func OtuapiTestModel(channel model.ModelChannel, modelName string) (string, bool
 		return "章鱼哥 Gemini 原生文本模型测试成功：" + result, true, nil
 	}
 	return "", false, nil
+}
+
+func OpenAICompatibleResponsesViaChatCompletions(channel model.ModelChannel, body []byte) ([]byte, string, error) {
+	var responsesRequest otuapiResponsesRequest
+	if err := json.Unmarshal(body, &responsesRequest); err != nil {
+		return nil, "", safeMessageError{message: "Responses 请求解析失败"}
+	}
+	chatRequest, err := otuapiChatRequestFromResponses(responsesRequest)
+	if err != nil {
+		return nil, "", err
+	}
+	requestBody, _ := json.Marshal(chatRequest)
+	request, err := http.NewRequest(http.MethodPost, BuildModelChannelURL(channel, "/chat/completions"), bytes.NewReader(requestBody))
+	if err != nil {
+		return nil, "", err
+	}
+	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := otuapiModelHTTPClient.Do(request)
+	if err != nil {
+		if isTimeoutError(err) {
+			return nil, "", safeMessageError{message: "AI 上游模型长时间没有响应，请检查该模型在当前渠道是否可用，或切换其他文本模型重试"}
+		}
+		return nil, "", safeMessageError{message: "AI 接口无响应或网络不可达"}
+	}
+	defer response.Body.Close()
+	responseBody, _ := io.ReadAll(response.Body)
+	if response.StatusCode >= http.StatusBadRequest {
+		return nil, "", readAdminChannelError(responseBody, response.StatusCode, "AI 请求失败")
+	}
+	payload, content, err := otuapiResponsesPayloadFromChat(responseBody, responsesRequest.Model)
+	if err != nil {
+		return nil, "", err
+	}
+	if responsesRequest.Stream {
+		event, _ := json.Marshal(map[string]interface{}{"type": "response.output_text.done", "text": content})
+		completed, _ := json.Marshal(map[string]interface{}{"type": "response.completed", "response": payload})
+		return []byte("data: " + string(event) + "\n\ndata: " + string(completed) + "\n\ndata: [DONE]\n\n"), "text/event-stream", nil
+	}
+	encoded, _ := json.Marshal(payload)
+	return encoded, "application/json", nil
 }
 
 func otuapiResponsesViaChatCompletions(channel model.ModelChannel, body []byte) ([]byte, string, error) {

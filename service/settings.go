@@ -207,11 +207,18 @@ func SelectModelChannel(modelName string) (model.ModelChannel, error) {
 
 func BuildModelChannelURL(channel model.ModelChannel, path string) string {
 	baseURL := normalizeModelChannelBaseURL(channel.BaseURL)
-	lowerBaseURL := strings.ToLower(baseURL)
-	if !strings.HasSuffix(lowerBaseURL, "/v1") && !strings.HasSuffix(lowerBaseURL, "/api/v3") && !strings.HasSuffix(lowerBaseURL, "/api/plan/v3") {
+	if !isVersionedModelChannelBaseURL(baseURL) {
 		baseURL += "/v1"
 	}
 	return baseURL + path
+}
+
+func isVersionedModelChannelBaseURL(baseURL string) bool {
+	lowerBaseURL := strings.ToLower(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
+	return strings.HasSuffix(lowerBaseURL, "/v1") ||
+		strings.HasSuffix(lowerBaseURL, "/api/v3") ||
+		strings.HasSuffix(lowerBaseURL, "/api/plan/v3") ||
+		strings.HasSuffix(lowerBaseURL, "/api/paas/v4")
 }
 
 func normalizeModelChannelBaseURL(baseURL string) string {

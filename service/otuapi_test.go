@@ -226,6 +226,48 @@ func TestOtuapiChatRequestOmitsToolMessageNameForOpenAICompatibleModels(t *testi
 	}
 }
 
+func TestOpenAICompatibleResponsesViaChatCompletionsPostsToChatCompletions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/paas/v4/chat/completions" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var request otuapiChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.Model != "glm-4.6" || len(request.Tools) != 1 {
+			t.Fatalf("unexpected request = %#v", request)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-test","model":"glm-4.6","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	body, _ := json.Marshal(map[string]any{
+		"model": "glm-4.6",
+		"input": []map[string]any{{"role": "user", "content": "hi"}},
+		"tools": []map[string]any{{
+			"type": "function",
+			"name": "canvas_get_state",
+			"parameters": map[string]any{"type": "object", "properties": map[string]any{}},
+		}},
+	})
+	responseBody, _, err := OpenAICompatibleResponsesViaChatCompletions(model.ModelChannel{
+		BaseURL: server.URL + "/api/paas/v4",
+		APIKey:  "test-key",
+	}, body)
+	if err != nil {
+		t.Fatalf("OpenAICompatibleResponsesViaChatCompletions returned error: %v", err)
+	}
+	var payload otuapiResponsePayload
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		t.Fatalf("decode response payload: %v", err)
+	}
+	if payload.OutputText != "ok" {
+		t.Fatalf("output_text = %q, want ok", payload.OutputText)
+	}
+}
+
 func TestOtuapiResponsesRejectsEmptyContentFilteredOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
