@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { BookOpen, Bot, Home, ImageIcon, Images, List, Menu, MessageSquare, Music2, Plus, Redo2, Settings2, Trash2, Undo2, Upload, Video } from "lucide-react";
+import { BookOpen, Bot, Home, ImageIcon, Images, List, Menu, MessageSquare, Music2, Plus, Redo2, Settings2, Sparkles, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
@@ -28,6 +28,7 @@ import { CanvasConfigComposer } from "../components/canvas-config-composer";
 import { CanvasConfigNodePanel } from "../components/canvas-config-node-panel";
 import { CanvasAssistantPanel } from "../components/canvas-assistant-panel";
 import { CanvasLocalAgentPanel } from "../components/canvas-local-agent-panel";
+import { CanvasWebsiteAgentPanel } from "../components/canvas-website-agent-panel";
 import { CanvasNodeContextMenu } from "../components/canvas-context-menu";
 import { CanvasNodeAngleDialog, type CanvasImageAngleParams } from "../components/canvas-node-angle-dialog";
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "../components/canvas-node-crop-dialog";
@@ -303,6 +304,7 @@ function InfiniteCanvasPage() {
     const [assistantMounted, setAssistantMounted] = useState(false);
     const [localAgentCollapsed, setLocalAgentCollapsed] = useState(true);
     const [localAgentMounted, setLocalAgentMounted] = useState(false);
+    const [websiteAgentMounted, setWebsiteAgentMounted] = useState(false);
     const [agentUndoSnapshot, setAgentUndoSnapshot] = useState<CanvasAgentSnapshot | null>(null);
     const [titleEditing, setTitleEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState("");
@@ -2569,11 +2571,13 @@ function InfiniteCanvasPage() {
                     onRedo={redoCanvas}
                     assistantCollapsed={assistantCollapsed}
                     localAgentOpen={localAgentOpen}
+                    websiteAgentOpen={websiteAgentMounted}
                     onExpandAssistant={() => {
                         setAssistantMounted(true);
                         setAssistantCollapsed(false);
                     }}
                     onToggleLocalAgent={() => (localAgentOpen ? closeLocalAgent() : openLocalAgent())}
+                    onToggleWebsiteAgent={() => setWebsiteAgentMounted((value) => !value)}
                 />
 
                 <InfiniteCanvas
@@ -2886,6 +2890,7 @@ function InfiniteCanvasPage() {
                     onCollapseStart={closeLocalAgent}
                 />
             ) : null}
+            {websiteAgentMounted ? <CanvasWebsiteAgentPanel snapshot={agentSnapshot} onApplyOps={applyAgentOps} onCollapse={() => setWebsiteAgentMounted(false)} /> : null}
         </main>
     );
 }
@@ -2909,8 +2914,10 @@ function CanvasTopBar({
     onRedo,
     assistantCollapsed,
     localAgentOpen,
+    websiteAgentOpen,
     onExpandAssistant,
     onToggleLocalAgent,
+    onToggleWebsiteAgent,
 }: {
     title: string;
     titleDraft: string;
@@ -2930,8 +2937,10 @@ function CanvasTopBar({
     onRedo: () => void;
     assistantCollapsed: boolean;
     localAgentOpen: boolean;
+    websiteAgentOpen: boolean;
     onExpandAssistant: () => void;
     onToggleLocalAgent: () => void;
+    onToggleWebsiteAgent: () => void;
 }) {
     const colorTheme = useThemeStore((state) => state.theme);
     const theme = canvasThemes[colorTheme];
@@ -3025,6 +3034,15 @@ function CanvasTopBar({
                         }}
                     />
                     <span className="h-6 w-px" style={{ background: theme.toolbar.border }} />
+                    <Button
+                        type="text"
+                        className="!h-10 !rounded-xl !px-3 !font-medium"
+                        style={{ background: websiteAgentOpen ? theme.toolbar.activeBg : theme.toolbar.panel, color: theme.node.text, boxShadow: "0 10px 30px rgba(28,25,23,.10)" }}
+                        icon={<Sparkles className="size-4" />}
+                        onClick={onToggleWebsiteAgent}
+                    >
+                        网站 Agent
+                    </Button>
                     <Button
                         type="text"
                         className="!h-10 !rounded-xl !px-3 !font-medium"
