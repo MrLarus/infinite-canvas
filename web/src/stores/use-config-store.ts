@@ -219,6 +219,17 @@ export function selectableModelsByCapability(config: AiConfig, capability?: Mode
     return config[modelListKey(capability)];
 }
 
+export function normalizeModelOptionValue(value: string | undefined, options: string[] = []) {
+    const model = (value || "").trim();
+    if (!model) return "";
+    const models = normalizeModelList(options);
+    if (!models.length) return model;
+    const exact = models.find((item) => item === model);
+    if (exact) return exact;
+    const modelKey = modelOptionSearchKey(model);
+    return models.find((item) => modelOptionSearchKey(item) === modelKey) || "";
+}
+
 function modelListKey(capability: ModelCapability) {
     return `${capability}Models` as "imageModels" | "videoModels" | "textModels" | "audioModels";
 }
@@ -317,6 +328,14 @@ export const useConfigStore = create<ConfigStore>()(
 
 function normalizeModelList(models: string[]) {
     return Array.from(new Set((models || []).map((model) => model.trim()).filter(Boolean)));
+}
+
+function modelOptionSearchKey(value: string) {
+    return value
+        .trim()
+        .replace(/^[`"']+|[`"']+$/g, "")
+        .toLowerCase()
+        .replace(/[\s_-]+/g, "");
 }
 
 export function normalizeWebdavConfig(config: WebdavSyncConfig | Partial<WebdavSyncConfig>): WebdavSyncConfig {

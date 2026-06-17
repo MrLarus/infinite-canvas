@@ -8,7 +8,7 @@ import { nanoid } from "nanoid";
 
 import { requestToolResponse, type ResponseFunctionTool, type ResponseInputMessage, type ResponseToolCall } from "@/services/api/image";
 import { canvasThemes } from "@/lib/canvas-theme";
-import { resolveImageSize, resolveVideoSize, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { normalizeModelOptionValue, resolveImageSize, resolveVideoSize, selectableModelsByCapability, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { useUserStore } from "@/stores/use-user-store";
 import { AgentChatComposer, AgentChatMessage, AgentPanelTabs, AgentWorkingMessage, type CanvasAgentChatMessage } from "./canvas-agent-chat-ui";
@@ -594,7 +594,7 @@ function defaultGenerationModel(config: AiConfig, mode: "text" | "image" | "vide
 
 function resolveGenerationModel(config: AiConfig, mode: "text" | "image" | "video" | "audio", model?: string) {
     const models = selectableModelsByCapability(config, mode);
-    const requested = (model || "").trim();
+    const requested = normalizeModelOptionValue(model, models);
     return requested && (!models.length || models.includes(requested)) ? requested : defaultGenerationModel(config, mode);
 }
 
