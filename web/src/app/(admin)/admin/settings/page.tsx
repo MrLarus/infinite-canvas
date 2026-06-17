@@ -44,7 +44,7 @@ const emptyChannel: AdminModelChannel = { protocol: "openai", name: "", baseUrl:
 const channelProtocolOptions = [
     { label: "OpenAI 兼容", value: "openai" },
     { label: "Gemini 原生", value: "gemini" },
-    { label: "章鱼哥 AI", value: "otuapi" },
+    { label: "聚合兼容", value: "otuapi" },
 ];
 
 type SettingsTabKey = "public" | "private";
