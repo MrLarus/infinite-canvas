@@ -338,7 +338,11 @@ func otuapiChatRequestFromResponses(request otuapiResponsesRequest) (otuapiChatR
 			if output == "" {
 				output = stringValue(item.Content)
 			}
-			messages = append(messages, otuapiChatMessage{Role: "tool", ToolCallID: item.CallID, Content: output})
+			toolCallID := item.CallID
+			if toolCallID == "" {
+				toolCallID = item.ToolCallID
+			}
+			messages = append(messages, otuapiChatMessage{Role: "tool", ToolCallID: toolCallID, Content: output})
 		case item.Role != "":
 			messages = append(messages, otuapiChatMessage{Role: item.Role, Content: otuapiChatContent(item.Content)})
 		}

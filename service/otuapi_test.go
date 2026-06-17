@@ -167,6 +167,26 @@ func TestOtuapiResponsesAllowsGemini35FlashToolCalls(t *testing.T) {
 	}
 }
 
+func TestOtuapiChatRequestUsesToolCallIDForToolMessages(t *testing.T) {
+	request, err := otuapiChatRequestFromResponses(otuapiResponsesRequest{
+		Model: "gemini-3.5-flash",
+		Input: []otuapiResponseInput{{
+			Role:       "tool",
+			ToolCallID: "call_123",
+			Content:    "ok",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("build chat request: %v", err)
+	}
+	if len(request.Messages) != 1 {
+		t.Fatalf("messages = %#v", request.Messages)
+	}
+	if request.Messages[0].ToolCallID != "call_123" {
+		t.Fatalf("tool_call_id = %q, want call_123", request.Messages[0].ToolCallID)
+	}
+}
+
 func TestOtuapiResponsesRejectsEmptyContentFilteredOutput(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
