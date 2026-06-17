@@ -10,9 +10,12 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/basketikun/infinite-canvas/service"
 )
+
+var aiProxyHTTPClient = &http.Client{Timeout: 65 * time.Second}
 
 func AIImagesGenerations(w http.ResponseWriter, r *http.Request) {
 	proxyAIRequest(w, r, "/images/generations")
@@ -119,7 +122,7 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 	path = service.OtuapiProxyPath(channel, modelName, path)
 	body, contentType = service.OtuapiNormalizeJSONRequest(channel, modelName, path, body, contentType)
 	body, contentType = service.OtuapiNormalizeFormRequest(channel, modelName, path, body, contentType)
-	if service.IsGeminiChannel(channel) {
+	if service.IsGeminiChannel(channel) || service.OtuapiUsesGeminiNativeImage(channel, modelName, path) {
 		if err := service.ConsumeUserCredits(user.ID, modelName, credits, path); err != nil {
 			FailError(w, err)
 			return
@@ -161,13 +164,13 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 }
 
 func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func()) {
-	response, err := http.DefaultClient.Do(request)
+	response, err := aiProxyHTTPClient.Do(request)
 	if err != nil {
 		log.Printf("AI proxy request failed: url=%s err=%v", request.URL.String(), err)
 		if onFailure != nil {
 			onFailure()
 		}
-		Fail(w, "AI 接口请求失败")
+		Fail(w, aiProxyRequestErrorMessage(err))
 		return
 	}
 	defer response.Body.Close()
@@ -192,6 +195,16 @@ func copyAIResponse(w http.ResponseWriter, request *http.Request, onFailure func
 	}
 	w.WriteHeader(response.StatusCode)
 	_, _ = io.Copy(w, response.Body)
+}
+
+func aiProxyRequestErrorMessage(err error) string {
+	if err == nil {
+		return "AI 接口请求失败"
+	}
+	if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
+		return "AI 上游接口长时间没有响应，请检查该模型在当前渠道是否可用，或切换其他模型重试"
+	}
+	return "AI 接口请求失败"
 }
 
 func readAIRequest(r *http.Request) ([]byte, string, string, error) {

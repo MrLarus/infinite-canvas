@@ -132,3 +132,36 @@ func TestNormalizeSettingsPublishesEnabledChannelModelsAndRepairsDefaults(t *tes
 		t.Fatalf("default video model = %q, want seedance", channel.DefaultVideoModel)
 	}
 }
+
+func TestNormalizeSettingsRepairsDefaultsWithWrongCapability(t *testing.T) {
+	settings := normalizeSettings(model.Settings{
+		Public: model.PublicSetting{
+			ModelChannel: model.PublicModelChannelSetting{
+				DefaultModel:      "image2",
+				DefaultTextModel:  "image2",
+				DefaultImageModel: "claude-opus-4-6",
+				DefaultVideoModel: "image2",
+			},
+		},
+		Private: model.PrivateSetting{
+			Channels: []model.ModelChannel{{
+				Enabled: true,
+				Models:  []string{"image2", "claude-opus-4-6", "gpt-4o", "sora-2-12s"},
+			}},
+		},
+	})
+
+	channel := settings.Public.ModelChannel
+	if channel.DefaultTextModel != "claude-opus-4-6" {
+		t.Fatalf("default text model = %q, want first text model", channel.DefaultTextModel)
+	}
+	if channel.DefaultModel != "claude-opus-4-6" {
+		t.Fatalf("default model = %q, want first text model", channel.DefaultModel)
+	}
+	if channel.DefaultImageModel != "image2" {
+		t.Fatalf("default image model = %q, want first image model", channel.DefaultImageModel)
+	}
+	if channel.DefaultVideoModel != "sora-2-12s" {
+		t.Fatalf("default video model = %q, want first video model", channel.DefaultVideoModel)
+	}
+}

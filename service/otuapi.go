@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime"
@@ -10,9 +11,12 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/basketikun/infinite-canvas/model"
 )
+
+var otuapiModelHTTPClient = &http.Client{Timeout: 65 * time.Second}
 
 type OtuapiProxyResult struct {
 	Handled     bool
@@ -199,6 +203,14 @@ func OtuapiUsesBearerAuth(channel model.ModelChannel) bool {
 	return IsOtuapiChannel(channel)
 }
 
+func OtuapiUsesGeminiNativeImage(channel model.ModelChannel, modelName string, path string) bool {
+	if !IsOtuapiChannel(channel) || path != "/images/generations" {
+		return false
+	}
+	model := strings.ToLower(strings.TrimSpace(modelName))
+	return strings.Contains(model, "gemini") && strings.Contains(model, "image-preview")
+}
+
 func OtuapiTestModel(channel model.ModelChannel, modelName string) (string, bool, error) {
 	if !IsOtuapiChannel(channel) {
 		return "", false, nil
@@ -209,6 +221,9 @@ func OtuapiTestModel(channel model.ModelChannel, modelName string) (string, bool
 	}
 	if otuapiAsyncImageModel(model) {
 		return "章鱼哥异步图片模型配置格式已检查；后台不会调用 /v1/videos 生成任务，请到生图功能中实测。", true, nil
+	}
+	if strings.Contains(model, "gemini") && strings.Contains(model, "image-preview") {
+		return "章鱼哥 Gemini 原生图片模型配置格式已检查；后台不会调用 generateContent 生成图片，请到生图功能中实测。", true, nil
 	}
 	if model == "image2" || strings.Contains(model, "image-preview") {
 		return "章鱼哥同步图片模型配置格式已检查；后台不会调用 /v1/images/generations 生成图片，请到生图功能中实测。", true, nil
@@ -235,8 +250,11 @@ func otuapiResponsesViaChatCompletions(channel model.ModelChannel, body []byte) 
 	}
 	request.Header.Set("Authorization", "Bearer "+channel.APIKey)
 	request.Header.Set("Content-Type", "application/json")
-	response, err := adminModelHTTPClient.Do(request)
+	response, err := otuapiModelHTTPClient.Do(request)
 	if err != nil {
+		if isTimeoutError(err) {
+			return nil, "", safeMessageError{message: "章鱼哥 AI 上游模型长时间没有响应，请检查该模型在章鱼哥后台是否可用，或切换其他文本模型重试"}
+		}
 		return nil, "", safeMessageError{message: "章鱼哥 AI 接口无响应或网络不可达"}
 	}
 	defer response.Body.Close()
@@ -255,6 +273,16 @@ func otuapiResponsesViaChatCompletions(channel model.ModelChannel, body []byte) 
 	}
 	encoded, _ := json.Marshal(payload)
 	return encoded, "application/json", nil
+}
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
+		return true
+	}
+	return err == context.DeadlineExceeded
 }
 
 func otuapiChatRequestFromResponses(request otuapiResponsesRequest) (otuapiChatRequest, error) {
