@@ -226,6 +226,43 @@ func TestOtuapiChatRequestOmitsToolMessageNameForOpenAICompatibleModels(t *testi
 	}
 }
 
+func TestOtuapiChatRequestAddsGLM52Defaults(t *testing.T) {
+	request, err := otuapiChatRequestFromResponses(otuapiResponsesRequest{
+		Model: "glm-5.2",
+		Input: []otuapiResponseInput{{Role: "user", Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("build chat request: %v", err)
+	}
+	if request.MaxTokens == nil || *request.MaxTokens != 512 {
+		t.Fatalf("max_tokens = %#v, want 512", request.MaxTokens)
+	}
+	thinking, ok := request.Thinking.(map[string]string)
+	if !ok || thinking["type"] != "disabled" {
+		t.Fatalf("thinking = %#v, want disabled", request.Thinking)
+	}
+}
+
+func TestOtuapiChatRequestPreservesLargerGLM52MaxOutputTokens(t *testing.T) {
+	maxTokens := 2048
+	request, err := otuapiChatRequestFromResponses(otuapiResponsesRequest{
+		Model:           "glm-5.2",
+		Input:           []otuapiResponseInput{{Role: "user", Content: "hi"}},
+		MaxOutputTokens: &maxTokens,
+		Thinking:        map[string]string{"type": "enabled"},
+	})
+	if err != nil {
+		t.Fatalf("build chat request: %v", err)
+	}
+	if request.MaxTokens == nil || *request.MaxTokens != 2048 {
+		t.Fatalf("max_tokens = %#v, want 2048", request.MaxTokens)
+	}
+	thinking, ok := request.Thinking.(map[string]string)
+	if !ok || thinking["type"] != "enabled" {
+		t.Fatalf("thinking = %#v, want enabled", request.Thinking)
+	}
+}
+
 func TestOpenAICompatibleResponsesViaChatCompletionsPostsToChatCompletions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/paas/v4/chat/completions" {

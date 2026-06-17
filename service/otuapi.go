@@ -35,6 +35,7 @@ type otuapiResponsesRequest struct {
 	Temperature       *float64               `json:"temperature,omitempty"`
 	TopP              *float64               `json:"top_p,omitempty"`
 	MaxOutputTokens   *int                   `json:"max_output_tokens,omitempty"`
+	Thinking          any                    `json:"thinking,omitempty"`
 	Extra             map[string]interface{} `json:"-"`
 }
 
@@ -101,6 +102,7 @@ type otuapiChatRequest struct {
 	Temperature       *float64            `json:"temperature,omitempty"`
 	TopP              *float64            `json:"top_p,omitempty"`
 	MaxTokens          *int                `json:"max_tokens,omitempty"`
+	Thinking           any                 `json:"thinking,omitempty"`
 }
 
 type otuapiChatResponse struct {
@@ -426,7 +428,9 @@ func otuapiChatRequestFromResponses(request otuapiResponsesRequest) (otuapiChatR
 		Temperature:       request.Temperature,
 		TopP:              request.TopP,
 		MaxTokens:          request.MaxOutputTokens,
+		Thinking:           request.Thinking,
 	}
+	applyGLM52ChatDefaults(&chat)
 	if strings.TrimSpace(chat.Model) == "" {
 		return chat, safeMessageError{message: "缺少模型名称"}
 	}
@@ -434,6 +438,24 @@ func otuapiChatRequestFromResponses(request otuapiResponsesRequest) (otuapiChatR
 		return chat, safeMessageError{message: "缺少对话内容"}
 	}
 	return chat, nil
+}
+
+func applyGLM52ChatDefaults(chat *otuapiChatRequest) {
+	if chat == nil || !isGLM52ModelName(chat.Model) {
+		return
+	}
+	if chat.MaxTokens == nil || *chat.MaxTokens < 512 {
+		minTokens := 512
+		chat.MaxTokens = &minTokens
+	}
+	if chat.Thinking == nil {
+		chat.Thinking = map[string]string{"type": "disabled"}
+	}
+}
+
+func isGLM52ModelName(modelName string) bool {
+	name := strings.Trim(strings.ToLower(strings.TrimSpace(modelName)), "`\"'")
+	return name == "glm-5.2" || name == "glm-5.2-air"
 }
 
 func otuapiChatToolMessageNeedsName(modelName string) bool {
