@@ -53,34 +53,39 @@ export async function startCodexThread(emit: AgentEmit, cwd?: string) {
 
 export async function resumeCodexThread(emit: AgentEmit, threadId: string, cwd?: string) {
     codexApp ||= await CodexAppClient.start(emit);
+    await loadCodexThread(emit, threadId, cwd, false);
     const thread = await codexApp.resumeThread(threadId, cwd);
+    assertThreadWorkspace(thread, cwd);
     codexThreadId = String(field(thread, "id") || threadId);
     return { thread, messages: threadMessages(thread) };
 }
 
-export async function listCodexThreads(emit: AgentEmit, options: { cwd?: string; all?: boolean; searchTerm?: string; limit?: number }) {
+export async function listCodexThreads(emit: AgentEmit, options: { cwd: string; searchTerm?: string; limit?: number }) {
     codexApp ||= await CodexAppClient.start(emit);
     const result = await codexApp.listThreads({
         limit: options.limit || 40,
         sortKey: "updated_at",
         sortDirection: "desc",
         sourceKinds: ["cli", "vscode", "appServer", "exec"],
-        ...(options.all ? {} : { cwd: options.cwd }),
+        cwd: options.cwd,
         ...(options.searchTerm ? { searchTerm: options.searchTerm } : {}),
     });
-    const data = Array.isArray(field(result, "data")) ? (field(result, "data") as unknown[]).map(summarizeCodexThread) : [];
+    const data = Array.isArray(field(result, "data")) ? (field(result, "data") as unknown[]).map(summarizeCodexThread).filter((thread) => threadInWorkspace(thread, options.cwd)) : [];
     return { data, nextCursor: field(result, "nextCursor") || null, backwardsCursor: field(result, "backwardsCursor") || null };
 }
 
-export async function readCodexThread(emit: AgentEmit, threadId: string) {
-    codexApp ||= await CodexAppClient.start(emit);
-    const result = await codexApp.readThread(threadId);
-    const thread = field(result, "thread") || {};
+export async function readCodexThread(emit: AgentEmit, threadId: string, cwd?: string) {
+    const thread = await loadCodexThread(emit, threadId, cwd, true);
     return { thread: summarizeCodexThread(thread), messages: threadMessages(thread) };
 }
 
-export async function archiveCodexThread(emit: AgentEmit, threadId: string) {
+export async function verifyCodexThreadWorkspace(emit: AgentEmit, threadId: string, cwd: string) {
+    await loadCodexThread(emit, threadId, cwd, false);
+}
+
+export async function archiveCodexThread(emit: AgentEmit, threadId: string, cwd?: string) {
     codexApp ||= await CodexAppClient.start(emit);
+    await loadCodexThread(emit, threadId, cwd, false);
     await codexApp.archiveThread(threadId);
 }
 
@@ -93,10 +98,11 @@ export function runClaudeTurn(prompt: string, emit: AgentEmit) {
 
 async function ensureCodexThread(app: CodexAppClient, options: CodexRunOptions) {
     if (options.threadId) {
-        if (codexThreadId !== options.threadId) {
-            const thread = await app.resumeThread(options.threadId, options.cwd);
-            codexThreadId = String(field(thread, "id") || options.threadId);
-        }
+        const result = await app.readThread(options.threadId, false);
+        assertThreadWorkspace(field(result, "thread") || {}, options.cwd);
+        const thread = await app.resumeThread(options.threadId, options.cwd);
+        assertThreadWorkspace(thread, options.cwd);
+        codexThreadId = String(field(thread, "id") || options.threadId);
         return codexThreadId;
     }
     if (!codexThreadId) {
@@ -155,8 +161,8 @@ class CodexAppClient {
         return this.request("thread/list", params);
     }
 
-    readThread(threadId: string) {
-        return this.request("thread/read", { threadId, includeTurns: true });
+    readThread(threadId: string, includeTurns = true) {
+        return this.request("thread/read", { threadId, includeTurns });
     }
 
     archiveThread(threadId: string) {
@@ -289,6 +295,24 @@ function normalizeCodexNotification(method: string, params: Json): AgentEvent | 
     if (method === "item/completed") return { type: "item.completed", item: normalizeItem(field(params, "item")) };
     if (method === "error") return { type: "error", message: field(params, "message") };
     return null;
+}
+
+async function loadCodexThread(emit: AgentEmit, threadId: string, cwd: string | undefined, includeTurns: boolean) {
+    codexApp ||= await CodexAppClient.start(emit);
+    const result = await codexApp.readThread(threadId, includeTurns);
+    const thread = field(result, "thread") || {};
+    assertThreadWorkspace(thread, cwd);
+    return thread;
+}
+
+function assertThreadWorkspace(thread: unknown, cwd?: string) {
+    if (!cwd || threadInWorkspace(thread, cwd)) return;
+    throw new Error("该 Codex 会话不属于当前画布工作空间");
+}
+
+function threadInWorkspace(thread: unknown, cwd: string) {
+    const threadCwd = String(field(thread, "cwd") || "");
+    return Boolean(threadCwd && path.resolve(threadCwd) === path.resolve(cwd));
 }
 
 function normalizeItem(item: unknown) {

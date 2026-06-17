@@ -2,7 +2,7 @@ import express, { type NextFunction, type Request, type Response } from "express
 
 import { DEFAULT_PORT, ensureCanvasWorkspace, loadConfig, saveConfig, updateCanvasWorkspace, type CanvasAgentConfig } from "./config.js";
 import { CanvasSession } from "./canvas-session.js";
-import { archiveCodexThread, listCodexThreads, readCodexThread, resumeCodexThread, runClaudeTurn, runCodexTurn, startCodexThread, summarizeCodexThread, withAgentPrompt } from "./agents.js";
+import { archiveCodexThread, listCodexThreads, readCodexThread, resumeCodexThread, runClaudeTurn, runCodexTurn, startCodexThread, summarizeCodexThread, verifyCodexThreadWorkspace, withAgentPrompt } from "./agents.js";
 import type { AgentAttachment } from "./types.js";
 
 export function startHttpServer() {
@@ -44,7 +44,7 @@ export function startHttpServer() {
     });
     app.get("/agent/codex/threads", route(async (req, res) => {
         const workspace = ensureCanvasWorkspace(config, String(req.query.canvasId || ""));
-        const result = await listCodexThreads(emit, { cwd: workspace.workspacePath, all: req.query.all === "1", searchTerm: String(req.query.searchTerm || "") });
+        const result = await listCodexThreads(emit, { cwd: workspace.workspacePath, searchTerm: String(req.query.searchTerm || "") });
         res.json({ ok: true, workspace, ...result });
     }));
     app.post("/agent/codex/threads/new", route(async (req, res) => {
@@ -55,8 +55,9 @@ export function startHttpServer() {
         res.json({ ok: true, workspace: { ...workspace, activeThreadId }, thread: summarizeCodexThread(thread), messages: [] });
     }));
     app.get("/agent/codex/threads/:threadId", route(async (req, res) => {
+        const workspace = ensureCanvasWorkspace(config, String(req.query.canvasId || ""));
         const threadId = routeParam(req.params.threadId);
-        res.json({ ok: true, ...(await readCodexThread(emit, threadId)) });
+        res.json({ ok: true, workspace, ...(await readCodexThread(emit, threadId, workspace.workspacePath)) });
     }));
     app.post("/agent/codex/threads/:threadId/resume", route(async (req, res) => {
         const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
@@ -68,7 +69,7 @@ export function startHttpServer() {
     app.post("/agent/codex/threads/:threadId/delete", route(async (req, res) => {
         const workspace = ensureCanvasWorkspace(config, String(req.body?.canvasId || ""));
         const threadId = routeParam(req.params.threadId);
-        await archiveCodexThread(emit, threadId);
+        await archiveCodexThread(emit, threadId, workspace.workspacePath);
         if (workspace.activeThreadId === threadId) updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: undefined });
         res.json({ ok: true });
     }));
@@ -81,6 +82,7 @@ export function startHttpServer() {
             threadId = String((thread as Record<string, unknown>).id || "");
             updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: threadId });
         } else if (threadId !== workspace.activeThreadId) {
+            await verifyCodexThreadWorkspace(emit, threadId, workspace.workspacePath);
             updateCanvasWorkspace(config, workspace.canvasId, { activeThreadId: threadId });
         }
         void runCodexTurn(withAgentPrompt(String(req.body?.prompt || "")), emit, attachments, { threadId, cwd: workspace.workspacePath });

@@ -75,7 +75,7 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, onApply
             });
             const nextThreadId = data.workspace?.activeThreadId || current.activeThreadId;
             if (nextThreadId && !current.messages.length) {
-                const thread = await fetchAgentJson<AgentThreadResponse>(endpoint, token, `/agent/codex/threads/${encodeURIComponent(nextThreadId)}`);
+                const thread = await fetchAgentJson<AgentThreadResponse>(endpoint, token, `/agent/codex/threads/${encodeURIComponent(nextThreadId)}?canvasId=${encodeURIComponent(projectId)}`);
                 setAgentState({ messages: normalizeHistoryMessages(thread.messages || []) });
             }
         } catch (error) {

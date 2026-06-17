@@ -715,10 +715,11 @@ function InfiniteCanvasPage() {
         [connections, currentProject?.title, nodes, projectId, selectedNodeIds, viewport],
     );
     const applyAgentOps = useCallback(
-        (ops: CanvasAgentOp[]) => {
+        (ops?: CanvasAgentOp[]) => {
+            const safeOps = Array.isArray(ops) ? ops.filter((op) => op?.type) : [];
             const before = { projectId, title: currentProject?.title || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current };
-            const generationOps = ops.filter((op): op is Extract<CanvasAgentOp, { type: "run_generation" }> => op.type === "run_generation");
-            const next = applyCanvasAgentOps(before, ops.filter((op) => op.type !== "run_generation"));
+            const generationOps = safeOps.filter((op): op is Extract<CanvasAgentOp, { type: "run_generation" }> => op.type === "run_generation" && Boolean(op.nodeId));
+            const next = applyCanvasAgentOps(before, safeOps.filter((op) => op.type !== "run_generation"));
             nodesRef.current = next.nodes;
             connectionsRef.current = next.connections;
             selectedNodeIdsRef.current = new Set(next.selectedNodeIds);
@@ -731,7 +732,13 @@ function InfiniteCanvasPage() {
             setViewport(next.viewport);
             setContextMenu(null);
             if (generationOps.length) {
-                queueMicrotask(() => generationOps.forEach((op) => void generateNodeRef.current?.(op.nodeId, op.mode || "image", op.prompt || "")));
+                queueMicrotask(() =>
+                    generationOps.forEach((op) => {
+                        const target = nodesRef.current.find((node) => node.id === op.nodeId);
+                        const prompt = op.prompt?.trim() ? op.prompt : target?.metadata?.composerContent ?? target?.metadata?.prompt ?? "";
+                        void generateNodeRef.current?.(op.nodeId, op.mode || target?.metadata?.generationMode || "image", prompt);
+                    }),
+                );
             }
             return { ...next, projectId, title: currentProject?.title || "未命名画布" };
         },
