@@ -169,6 +169,7 @@ function resolveRequestSize(quality: string | undefined, size: string) {
 
 function resolveImageDataUrl(item: Record<string, unknown>) {
     if (typeof item.b64_json === "string" && item.b64_json) {
+        if (item.b64_json.startsWith("data:image/")) return item.b64_json;
         return `data:image/png;base64,${item.b64_json}`;
     }
     if (typeof item.url === "string" && item.url) {
@@ -407,7 +408,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     const requestSize = resolveRequestSize(quality, config.size);
     if (isAsyncVideoImageModel(config.model)) {
         try {
-            const tasks = await Promise.all(Array.from({ length: n }, () => requestAsyncImageTask(config, withSystemPrompt(config, prompt), quality, requestSize, options)));
+            const tasks = await Promise.all(Array.from({ length: n }, () => requestAsyncImageTask(config, withSystemPrompt(config, prompt), quality, asyncImageAspectRatio(config.size), options)));
             const images = await Promise.all(tasks.map((task) => pollAsyncImageTask(config, task, options)));
             refreshRemoteUser(config);
             return images.map((dataUrl) => ({ id: nanoid(), dataUrl }));
@@ -440,7 +441,7 @@ export async function requestGeneration(config: AiConfig, prompt: string, option
     }
 }
 
-async function requestAsyncImageTask(config: AiConfig, prompt: string, quality: string | undefined, size: string | undefined, options?: RequestOptions) {
+async function requestAsyncImageTask(config: AiConfig, prompt: string, quality: string | undefined, size: string | undefined, options?: RequestOptions, images: string[] = []) {
     const response = await axios.post<AsyncImageTaskResponse>(
         aiApiUrl(config, "/videos"),
         {
@@ -448,7 +449,8 @@ async function requestAsyncImageTask(config: AiConfig, prompt: string, quality: 
             prompt,
             n: 1,
             ...(quality ? { quality } : {}),
-            ...(size ? { size } : {}),
+            ...(size ? asyncImageSizeParams(config.model, size) : {}),
+            ...(images.length ? { images } : {}),
             response_format: "url",
             output_format: IMAGE_OUTPUT_FORMAT,
         },
@@ -496,6 +498,34 @@ function isAsyncVideoImageModel(model: string) {
     return value === "gpt-image-2" || value.startsWith("gpt-image-2-") || value === "nano_banana_2" || value.startsWith("nano_banana_pro");
 }
 
+function asyncImageSizeParams(model: string, size: string) {
+    return isAsyncVideoImageModel(model) ? { aspect_ratio: sizeToAspectRatio(size) } : { size };
+}
+
+function asyncImageAspectRatio(size: string) {
+    const value = size.trim();
+    if (!value || value === "auto") return undefined;
+    return value;
+}
+
+function sizeToAspectRatio(size: string) {
+    const value = size.trim();
+    if (!value || value === "auto") return "auto";
+    if (value.includes(":")) return value;
+    const match = value.match(/^(\d+)x(\d+)$/);
+    if (!match) return value;
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!width || !height) return value;
+    const divisor = gcd(width, height);
+    return `${width / divisor}:${height / divisor}`;
+}
+
+function gcd(a: number, b: number): number {
+    while (b) [a, b] = [b, a % b];
+    return Math.abs(a) || 1;
+}
+
 function isImageTaskResult(task: AsyncImageTask, url: string) {
     return task.object?.toLowerCase().includes("image") || isImageUrl(url);
 }
@@ -536,6 +566,20 @@ export async function requestEdit(config: AiConfig, prompt: string, references: 
     const quality = normalizeQuality(config.quality);
     const requestSize = resolveRequestSize(quality, config.size);
     const requestPrompt = buildImageReferencePromptText(prompt, references);
+    if (isAsyncVideoImageModel(config.model)) {
+        if (mask) throw new Error("当前异步图片模型暂不支持蒙版编辑");
+        const referenceImages = await Promise.all(references.slice(0, 5).map(async (image) => imageToDataUrl(image)));
+        const images = referenceImages.filter((value): value is string => Boolean(value));
+        if (!images.length) throw new Error("请至少连接一张参考图");
+        try {
+            const tasks = await Promise.all(Array.from({ length: n }, () => requestAsyncImageTask(config, withSystemPrompt(config, requestPrompt), quality, asyncImageAspectRatio(config.size), options, images)));
+            const results = await Promise.all(tasks.map((task) => pollAsyncImageTask(config, task, options)));
+            refreshRemoteUser(config);
+            return results.map((dataUrl) => ({ id: nanoid(), dataUrl }));
+        } catch (error) {
+            throw new Error(readAxiosError(error, "请求失败"));
+        }
+    }
     const formData = new FormData();
     formData.set("model", config.model);
     formData.set("prompt", withSystemPrompt(config, requestPrompt));

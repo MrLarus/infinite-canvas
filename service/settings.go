@@ -59,6 +59,9 @@ func AdminTestChannelModel(index *int, channel model.ModelChannel, modelName str
 	if IsGeminiChannel(resolved) {
 		return GeminiTestModel(resolved, modelName)
 	}
+	if result, handled, err := OtuapiTestModel(resolved, modelName); handled {
+		return result, err
+	}
 	if isArkAgentPlanChannel(resolved) || isSeedanceModelName(modelName) {
 		return testArkSeedanceChannelModel(resolved, modelName)
 	}
@@ -286,12 +289,15 @@ func repairDefaultModel(current string, models []string, preferred func(string) 
 
 func isVideoModelName(modelName string) bool {
 	name := strings.ToLower(strings.TrimSpace(modelName))
-	return strings.Contains(name, "seedance") || strings.Contains(name, "video")
+	return strings.Contains(name, "seedance") || strings.Contains(name, "video") || strings.Contains(name, "sora") || strings.Contains(name, "veo") || strings.Contains(name, "omni")
 }
 
 func isImageModelName(modelName string) bool {
 	name := strings.ToLower(strings.TrimSpace(modelName))
-	return strings.Contains(name, "seedream") || strings.Contains(name, "gpt-image") || strings.Contains(name, "image")
+	if isVideoModelName(modelName) {
+		return false
+	}
+	return strings.Contains(name, "seedream") || strings.Contains(name, "gpt-image") || strings.Contains(name, "image") || strings.Contains(name, "nano_banana") || strings.Contains(name, "banana")
 }
 
 func isTextModelName(modelName string) bool {

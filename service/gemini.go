@@ -15,6 +15,9 @@ import (
 type GeminiPart struct {
 	Text       string             `json:"text,omitempty"`
 	InlineData *GeminiInlineData `json:"inlineData,omitempty"`
+	ImageURL   *struct {
+		URL string `json:"url,omitempty"`
+	} `json:"image_url,omitempty"`
 }
 
 type GeminiInlineData struct {
@@ -71,7 +74,7 @@ func GeminiFetchModels(channel model.ModelChannel) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("x-goog-api-key", channel.APIKey)
+	setGeminiAuthHeader(request, channel)
 	response, err := adminModelHTTPClient.Do(request)
 	if err != nil {
 		return nil, safeMessageError{message: "读取模型失败：Gemini 接口无响应或网络不可达"}
@@ -180,6 +183,8 @@ func geminiImageGenerations(channel model.ModelChannel, body []byte) ([]byte, st
 		Model  string `json:"model"`
 		Prompt string `json:"prompt"`
 		N      int    `json:"n"`
+		Size   string `json:"size"`
+		Quality string `json:"quality"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return nil, "", safeMessageError{message: "Gemini 图片请求解析失败"}
@@ -195,9 +200,7 @@ func geminiImageGenerations(channel model.ModelChannel, body []byte) ([]byte, st
 	for i := 0; i < count; i++ {
 		requestBody, _ := json.Marshal(GeminiGenerateRequest{
 			Contents: []GeminiContent{{Role: "user", Parts: []GeminiPart{{Text: payload.Prompt}}}},
-			GenerationConfig: map[string]interface{}{
-				"responseModalities": []string{"TEXT", "IMAGE"},
-			},
+			GenerationConfig: geminiImageGenerationConfig(channel, payload.Model, payload.Size, payload.Quality),
 		})
 		responseBody, err := doGeminiGenerate(channel, payload.Model, requestBody)
 		if err != nil {
@@ -215,6 +218,62 @@ func geminiImageGenerations(channel model.ModelChannel, body []byte) ([]byte, st
 	}
 	openAI, _ := json.Marshal(map[string]interface{}{"data": images})
 	return openAI, "application/json", nil
+}
+
+func geminiImageGenerationConfig(channel model.ModelChannel, modelName string, size string, quality string) map[string]interface{} {
+	config := map[string]interface{}{
+		"responseModalities": []string{"TEXT", "IMAGE"},
+	}
+	if !IsOtuapiChannel(channel) {
+		return config
+	}
+	config["responseModalities"] = []string{"IMAGE"}
+	imageConfig := map[string]interface{}{}
+	if ratio := geminiAspectRatioFromSize(size); ratio != "" {
+		imageConfig["aspectRatio"] = ratio
+	}
+	if imageSize := geminiImageSizeFromQuality(modelName, quality); imageSize != "" {
+		imageConfig["imageSize"] = imageSize
+	}
+	if len(imageConfig) > 0 {
+		config["imageConfig"] = imageConfig
+	}
+	return config
+}
+
+func geminiImageSizeFromQuality(modelName string, quality string) string {
+	if !strings.Contains(strings.ToLower(modelName), "flash-image") {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(quality)) {
+	case "low", "standard", "1k":
+		return "1K"
+	case "medium", "hd", "2k":
+		return "2K"
+	case "high", "4k":
+		return "4K"
+	default:
+		return ""
+	}
+}
+
+func geminiAspectRatioFromSize(size string) string {
+	value := strings.TrimSpace(size)
+	if value == "" || strings.EqualFold(value, "auto") {
+		return ""
+	}
+	if strings.Contains(value, ":") {
+		return value
+	}
+	parts := strings.Split(strings.ToLower(value), "x")
+	if len(parts) != 2 {
+		return ""
+	}
+	width, height := parsePositiveInt(parts[0]), parsePositiveInt(parts[1])
+	if width <= 0 || height <= 0 {
+		return ""
+	}
+	return reduceRatio(width, height)
 }
 
 func geminiBodyFromChatMessages(messages []OpenAIChatMessage) ([]byte, error) {
@@ -297,7 +356,7 @@ func doGeminiGenerate(channel model.ModelChannel, modelName string, body []byte)
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("x-goog-api-key", channel.APIKey)
+	setGeminiAuthHeader(request, channel)
 	request.Header.Set("Content-Type", "application/json")
 	response, err := adminModelHTTPClient.Do(request)
 	if err != nil {
@@ -350,12 +409,23 @@ func geminiText(payload GeminiGenerateResponse) string {
 
 func geminiFirstImage(payload GeminiGenerateResponse) (map[string]string, error) {
 	for _, part := range geminiParts(payload) {
+		if part.ImageURL != nil && part.ImageURL.URL != "" {
+			return map[string]string{"url": part.ImageURL.URL}, nil
+		}
 		if part.InlineData == nil || part.InlineData.Data == "" {
 			continue
 		}
 		return map[string]string{"b64_json": part.InlineData.Data}, nil
 	}
 	return nil, safeMessageError{message: "Gemini 接口没有返回图片"}
+}
+
+func setGeminiAuthHeader(request *http.Request, channel model.ModelChannel) {
+	if OtuapiUsesBearerAuth(channel) {
+		request.Header.Set("Authorization", "Bearer "+channel.APIKey)
+		return
+	}
+	request.Header.Set("x-goog-api-key", channel.APIKey)
 }
 
 func geminiParts(payload GeminiGenerateResponse) []GeminiPart {

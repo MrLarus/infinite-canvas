@@ -86,6 +86,16 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 }
 
 async function createOpenAIVideoTask(config: AiConfig, model: string, prompt: string, references: ReferenceImage[], options?: RequestOptions): Promise<VideoGenerationTask> {
+    if (isOtuapiVideoModel(model)) {
+        const body = await buildOtuapiVideoPayload(config, model, prompt, references);
+        try {
+            const created = unwrapVideoResponse((await axios.post<ApiVideoResponse>(aiApiUrl(config, "/videos"), body, { headers: aiHeaders(config, "application/json"), signal: options?.signal })).data);
+            if (!created.id) throw new Error("视频接口没有返回任务 ID");
+            return { id: created.id, provider: "openai", model };
+        } catch (error) {
+            throw new Error(readAxiosError(error, "视频任务创建失败"));
+        }
+    }
     const body = new FormData();
     body.append("model", model);
     body.append("prompt", prompt);
@@ -296,7 +306,11 @@ function normalizeVideoResolution(value: string) {
 }
 
 function unwrapVideoResponse(payload: ApiVideoResponse) {
-    return unwrapEnvelope(payload, "接口没有返回视频任务");
+    const value = unwrapEnvelope(payload, "接口没有返回视频任务");
+    if (value && typeof value === "object" && "data" in value && value.data && typeof value.data === "object") {
+        return { ...value, ...(value.data as VideoResponse) } as VideoResponse;
+    }
+    return value;
 }
 
 function unwrapSeedanceTask(payload: ApiEnvelope<SeedanceTask>) {
@@ -331,6 +345,29 @@ function statusMessage(status: number | undefined, fallback: string) {
 
 function isImageVideoResult(video: VideoResponse, url: string) {
     return video.object?.toLowerCase().includes("image") || isImageUrl(url);
+}
+
+function isOtuapiVideoModel(model: string) {
+    const value = model.trim().toLowerCase();
+    return value.includes("sora") || value.includes("veo") || value.includes("omni");
+}
+
+async function buildOtuapiVideoPayload(config: AiConfig, model: string, prompt: string, references: ReferenceImage[]) {
+    const size = normalizeVideoSize(config.size);
+    const payload: Record<string, unknown> = { model, prompt };
+    if (size) payload.size = size;
+    const images = await Promise.all(references.slice(0, 7).map((image) => resolveOtuapiImageReference(config, image)));
+    if (images.length) payload.images = images;
+    return payload;
+}
+
+async function resolveOtuapiImageReference(config: AiConfig, image: ReferenceImage) {
+    const directUrl = image.url || image.dataUrl;
+    if (isPublicMediaUrl(directUrl)) return directUrl;
+    const dataUrl = await imageToDataUrl(image);
+    if (!dataUrl) throw new Error("参考图读取失败，请换一张图片或重新上传");
+    if (config.channelMode === "remote") return uploadReferenceMedia(dataUrlToFile({ ...image, dataUrl }));
+    return dataUrl;
 }
 
 function isImageUrl(url: string) {

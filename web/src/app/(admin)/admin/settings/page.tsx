@@ -44,6 +44,7 @@ const emptyChannel: AdminModelChannel = { protocol: "openai", name: "", baseUrl:
 const channelProtocolOptions = [
     { label: "OpenAI 兼容", value: "openai" },
     { label: "Gemini 原生", value: "gemini" },
+    { label: "章鱼哥 AI", value: "otuapi" },
 ];
 
 type SettingsTabKey = "public" | "private";
@@ -875,7 +876,7 @@ function normalizePrivateSetting(setting: Partial<AdminSettings["private"]> = {}
 
 function normalizeChannel(item: Partial<AdminModelChannel> = {}): AdminModelChannel {
     return {
-        protocol: item.protocol === "gemini" ? "gemini" : "openai",
+        protocol: item.protocol === "gemini" || item.protocol === "otuapi" ? item.protocol : "openai",
         name: item.name || "",
         baseUrl: item.baseUrl || "",
         apiKey: item.apiKey || "",

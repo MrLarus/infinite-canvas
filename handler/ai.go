@@ -57,6 +57,7 @@ func proxyAIGetRequest(w http.ResponseWriter, r *http.Request, path string) {
 		Fail(w, "AI 接口请求失败")
 		return
 	}
+	path = service.OtuapiProxyPath(channel, modelName, path)
 	if service.IsGeminiChannel(channel) {
 		FailError(w, service.GeminiUnsupportedGet(path))
 		return
@@ -96,6 +97,28 @@ func proxyAIRequest(w http.ResponseWriter, r *http.Request, path string) {
 		Fail(w, "AI 接口请求失败")
 		return
 	}
+	if service.IsOtuapiChannel(channel) && path == "/responses" {
+		if err := service.ConsumeUserCredits(user.ID, modelName, credits, path); err != nil {
+			FailError(w, err)
+			return
+		}
+		result := service.OtuapiProxyRequest(channel, path, body, contentType)
+		if result.Err != nil {
+			if refundErr := service.RefundUserCredits(user.ID, modelName, credits, path); refundErr != nil {
+				log.Printf("AI proxy refund credits failed: user=%s model=%s credits=%d err=%v", user.ID, modelName, credits, refundErr)
+			}
+			FailError(w, result.Err)
+			return
+		}
+		if result.ContentType != "" {
+			w.Header().Set("Content-Type", result.ContentType)
+		}
+		_, _ = w.Write(result.Body)
+		return
+	}
+	path = service.OtuapiProxyPath(channel, modelName, path)
+	body, contentType = service.OtuapiNormalizeJSONRequest(channel, modelName, path, body, contentType)
+	body, contentType = service.OtuapiNormalizeFormRequest(channel, modelName, path, body, contentType)
 	if service.IsGeminiChannel(channel) {
 		if err := service.ConsumeUserCredits(user.ID, modelName, credits, path); err != nil {
 			FailError(w, err)
