@@ -21,10 +21,7 @@ export type ResponseToolCall = {
     function: { name: string; arguments: string };
 };
 
-export type ResponseInputMessage =
-    | AiTextMessage
-    | { type: "function_call"; call_id: string; name: string; arguments: string }
-    | { role: "tool"; tool_call_id: string; content: string };
+export type ResponseInputMessage = AiTextMessage | { type: "function_call"; call_id: string; name: string; arguments: string } | { role: "tool"; tool_call_id: string; content: string };
 
 export type ResponseFunctionTool = {
     type: "function";
@@ -44,10 +41,7 @@ export type ToolResponseResult = {
 type ToolChoice = "auto" | "required" | { type: "function"; name: string };
 type ResponseMessageContent = AiTextMessage["content"] | string;
 type ResponseInputContent = { type: "input_text"; text: string } | { type: "input_image"; image_url: string };
-type ResponseInputItem =
-    | { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] }
-    | { type: "function_call"; call_id: string; name: string; arguments: string }
-    | { type: "function_call_output"; call_id: string; output: string };
+type ResponseInputItem = { role: "system" | "user" | "assistant"; content: string | ResponseInputContent[] } | { type: "function_call"; call_id: string; name: string; arguments: string } | { type: "function_call_output"; call_id: string; output: string };
 type ResponseApiToolDefinition = {
     type: "function";
     name: string;
@@ -55,9 +49,7 @@ type ResponseApiToolDefinition = {
     parameters: Record<string, unknown>;
     strict?: boolean;
 };
-type ResponseApiOutputItem =
-    | { type?: "message"; content?: Array<{ type?: string; text?: string }> }
-    | { type?: "function_call"; id?: string; call_id?: string; name?: string; arguments?: string };
+type ResponseApiOutputItem = { type?: "message"; content?: Array<{ type?: string; text?: string }> } | { type?: "function_call"; id?: string; call_id?: string; name?: string; arguments?: string };
 type ResponseApiPayload = {
     id?: string;
     output?: ResponseApiOutputItem[];
@@ -337,8 +329,9 @@ function consumeResponseStreamText(state: ResponseStreamState, text: string, onD
     for (;;) {
         const match = state.buffer.match(/\r?\n\r?\n/);
         if (!match) break;
-        consumeResponseStreamBlock(state.buffer.slice(0, match.index), state, onDelta);
-        state.buffer = state.buffer.slice(match.index + match[0].length);
+        const index = match.index ?? 0;
+        consumeResponseStreamBlock(state.buffer.slice(0, index), state, onDelta);
+        state.buffer = state.buffer.slice(index + match[0].length);
     }
     if (flush && state.buffer.trim()) {
         consumeResponseStreamBlock(state.buffer, state, onDelta);
