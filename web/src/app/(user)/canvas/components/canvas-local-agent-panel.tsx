@@ -279,11 +279,17 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, onApply
     };
 
     const approvePendingTool = async () => {
-        if (!pendingTool) return;
-        const tool = pendingTool;
+        const tool = pendingToolRef.current || pendingTool;
+        if (!tool) return;
         pendingToolRef.current = null;
         setAgentState({ pendingTool: null });
         await runToolCall(endpoint, token, tool);
+    };
+
+    const handleConfirmToolsChange = (nextConfirmTools: boolean) => {
+        confirmToolsRef.current = nextConfirmTools;
+        setAgentState({ confirmTools: nextConfirmTools });
+        if (!nextConfirmTools && pendingToolRef.current) void approvePendingTool();
     };
 
     const undoLastTool = () => {
@@ -522,8 +528,8 @@ export function CanvasLocalAgentPanel({ snapshot, canUndoOps, collapsed, onApply
                     </nav>
                     <div className="flex shrink-0 items-center gap-2">
                         <label className="flex items-center gap-1.5 text-xs" style={{ color: theme.node.muted }}>
-                            <Switch size="small" checked={confirmTools} onChange={(confirmTools) => setAgentState({ confirmTools })} />
-                            工具确认
+                            <Switch size="small" checked={confirmTools} onChange={handleConfirmToolsChange} />
+                            执行前确认
                         </label>
                         <Button size="small" type="text" disabled={!canUndoOps} icon={<RotateCcw className="size-3.5" />} onClick={undoLastTool}>
                             撤销

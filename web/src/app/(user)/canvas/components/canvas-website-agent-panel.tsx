@@ -190,11 +190,15 @@ export function CanvasWebsiteAgentPanel({ snapshot, onApplyOps, onCollapse }: Ca
     const [messages, setMessages] = useState<CanvasAgentChatMessage[]>([]);
     const [logs, setLogs] = useState<AgentLog[]>([]);
     const snapshotRef = useRef(snapshot);
+    const confirmToolsRef = useRef(confirmTools);
     const pendingToolContextRef = useRef(new Map<string, PendingToolContext>());
 
     useEffect(() => {
         snapshotRef.current = snapshot;
     }, [snapshot]);
+    useEffect(() => {
+        confirmToolsRef.current = confirmTools;
+    }, [confirmTools]);
 
     const [agentModel, setAgentModel] = useState("");
     const agentConfig = useMemo(() => withAgentCompatibleModels(effectiveConfig), [effectiveConfig]);
@@ -241,7 +245,7 @@ export function CanvasWebsiteAgentPanel({ snapshot, onApplyOps, onCollapse }: Ca
                 return;
             }
             const writable = result.toolCalls.filter((call) => !READ_TOOL_NAMES.has(call.function.name));
-            if (confirmTools && writable.length) {
+            if (confirmToolsRef.current && writable.length) {
                 upsertMessage({ id: assistantId, role: "assistant", text: result.content || streamed || "准备执行工具，等待确认。" });
                 const toolMessageId = nanoid();
                 pendingToolContextRef.current.set(toolMessageId, { messages: inputMessages, toolCalls: result.toolCalls, assistantId, step });
@@ -269,9 +273,9 @@ export function CanvasWebsiteAgentPanel({ snapshot, onApplyOps, onCollapse }: Ca
         await runAgentStep(assistantId, nextMessages, step + 1, "auto");
     };
 
-    const approveTool = async (messageId: string) => {
+    const runPendingTool = async (messageId: string, ignoreRunning = false) => {
         const context = pendingToolContextRef.current.get(messageId);
-        if (!context || running) return;
+        if (!context || (!ignoreRunning && running)) return;
         pendingToolContextRef.current.delete(messageId);
         upsertMessage({ id: messageId, role: "tool", title: "工具执行中", text: summarizeToolCalls(context.toolCalls), detail: { status: "running", toolCalls: context.toolCalls } });
         try {
@@ -283,6 +287,19 @@ export function CanvasWebsiteAgentPanel({ snapshot, onApplyOps, onCollapse }: Ca
             addMessage({ id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
         } finally {
             setRunning(false);
+        }
+    };
+
+    const approveTool = async (messageId: string) => {
+        await runPendingTool(messageId);
+    };
+
+    const handleConfirmToolsChange = (checked: boolean) => {
+        confirmToolsRef.current = checked;
+        setConfirmTools(checked);
+        if (!checked && pendingToolContextRef.current.size) {
+            const [messageId] = pendingToolContextRef.current.keys();
+            if (messageId) void runPendingTool(messageId, true);
         }
     };
 
@@ -410,8 +427,8 @@ export function CanvasWebsiteAgentPanel({ snapshot, onApplyOps, onCollapse }: Ca
                     ]}
                     right={
                         <label className="flex shrink-0 items-center gap-1.5 text-xs" style={{ color: theme.node.muted }}>
-                            确认执行
-                            <Switch size="small" checked={confirmTools} onChange={setConfirmTools} />
+                            执行前确认
+                            <Switch size="small" checked={confirmTools} onChange={handleConfirmToolsChange} />
                         </label>
                     }
                     onChange={setActiveTab}
