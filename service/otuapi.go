@@ -40,14 +40,14 @@ type otuapiResponsesRequest struct {
 }
 
 type otuapiResponseInput struct {
-	Role       string                    `json:"role,omitempty"`
-	Content    any                       `json:"content,omitempty"`
-	Type       string                    `json:"type,omitempty"`
-	CallID     string                    `json:"call_id,omitempty"`
-	Name       string                    `json:"name,omitempty"`
-	Arguments  string                    `json:"arguments,omitempty"`
-	ToolCallID string                    `json:"tool_call_id,omitempty"`
-	Output     string                    `json:"output,omitempty"`
+	Role       string                     `json:"role,omitempty"`
+	Content    any                        `json:"content,omitempty"`
+	Type       string                     `json:"type,omitempty"`
+	CallID     string                     `json:"call_id,omitempty"`
+	Name       string                     `json:"name,omitempty"`
+	Arguments  string                     `json:"arguments,omitempty"`
+	ToolCallID string                     `json:"tool_call_id,omitempty"`
+	Output     string                     `json:"output,omitempty"`
 	Extra      map[string]json.RawMessage `json:"-"`
 }
 
@@ -66,10 +66,10 @@ type otuapiResponseTool struct {
 }
 
 type otuapiChatMessage struct {
-	Role       string              `json:"role"`
-	Content    any                 `json:"content,omitempty"`
-	Name       string              `json:"name,omitempty"`
-	ToolCallID string              `json:"tool_call_id,omitempty"`
+	Role       string               `json:"role"`
+	Content    any                  `json:"content,omitempty"`
+	Name       string               `json:"name,omitempty"`
+	ToolCallID string               `json:"tool_call_id,omitempty"`
 	ToolCalls  []otuapiChatToolCall `json:"tool_calls,omitempty"`
 }
 
@@ -94,15 +94,15 @@ type otuapiChatToolCall struct {
 
 type otuapiChatRequest struct {
 	Model             string              `json:"model"`
-	Messages          []otuapiChatMessage  `json:"messages"`
-	Tools             []otuapiChatTool     `json:"tools,omitempty"`
+	Messages          []otuapiChatMessage `json:"messages"`
+	Tools             []otuapiChatTool    `json:"tools,omitempty"`
 	ToolChoice        any                 `json:"tool_choice,omitempty"`
 	ParallelToolCalls bool                `json:"parallel_tool_calls,omitempty"`
 	Stream            bool                `json:"stream,omitempty"`
 	Temperature       *float64            `json:"temperature,omitempty"`
 	TopP              *float64            `json:"top_p,omitempty"`
-	MaxTokens          *int                `json:"max_tokens,omitempty"`
-	Thinking           any                 `json:"thinking,omitempty"`
+	MaxTokens         *int                `json:"max_tokens,omitempty"`
+	Thinking          any                 `json:"thinking,omitempty"`
 }
 
 type otuapiChatResponse struct {
@@ -112,12 +112,12 @@ type otuapiChatResponse struct {
 	Model   string `json:"model,omitempty"`
 	Choices []struct {
 		Message struct {
-			Role      string              `json:"role,omitempty"`
-			Content   any                 `json:"content,omitempty"`
+			Role      string               `json:"role,omitempty"`
+			Content   any                  `json:"content,omitempty"`
 			ToolCalls []otuapiChatToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 		Delta struct {
-			Content   string              `json:"content,omitempty"`
+			Content   string               `json:"content,omitempty"`
 			ToolCalls []otuapiChatToolCall `json:"tool_calls,omitempty"`
 		} `json:"delta,omitempty"`
 		FinishReason string `json:"finish_reason,omitempty"`
@@ -128,11 +128,11 @@ type otuapiChatResponse struct {
 }
 
 type otuapiResponsePayload struct {
-	ID         string                     `json:"id,omitempty"`
-	Object     string                     `json:"object"`
-	Model      string                     `json:"model,omitempty"`
-	Output     []map[string]interface{}   `json:"output"`
-	OutputText string                     `json:"output_text"`
+	ID         string                   `json:"id,omitempty"`
+	Object     string                   `json:"object"`
+	Model      string                   `json:"model,omitempty"`
+	Output     []map[string]interface{} `json:"output"`
+	OutputText string                   `json:"output_text"`
 	Error      *struct {
 		Message string `json:"message,omitempty"`
 	} `json:"error,omitempty"`
@@ -418,8 +418,8 @@ func otuapiChatRequestFromResponses(request otuapiResponsesRequest) (otuapiChatR
 		Stream:            false,
 		Temperature:       request.Temperature,
 		TopP:              request.TopP,
-		MaxTokens:          request.MaxOutputTokens,
-		Thinking:           request.Thinking,
+		MaxTokens:         request.MaxOutputTokens,
+		Thinking:          request.Thinking,
 	}
 	applyGLM52ChatDefaults(&chat)
 	if strings.TrimSpace(chat.Model) == "" {
@@ -607,6 +607,12 @@ func otuapiNormalizeVideoJSONBody(model string, body []byte) ([]byte, bool) {
 		return nil, false
 	}
 	changed := false
+	if ratio := stringValue(payload["aspect_ratio"]); ratio != "" && otuapiAsyncImageModel(model) {
+		if canonical := otuapiAspectRatioFromSize(ratio); canonical != "" && canonical != ratio {
+			payload["aspect_ratio"] = canonical
+			changed = true
+		}
+	}
 	if size := stringValue(payload["size"]); size != "" {
 		if ratio := otuapiAspectRatioFromSize(size); ratio != "" && otuapiAsyncImageModel(model) {
 			payload["aspect_ratio"] = ratio
@@ -697,6 +703,11 @@ func otuapiAspectRatioFromSize(size string) string {
 		return ""
 	}
 	if strings.Contains(value, ":") {
+		if width, height, ok := parseAspectRatioPair(value, ":"); ok {
+			if ratio, ok := canonicalSupportedImageAspectRatio(width, height); ok {
+				return ratio
+			}
+		}
 		return value
 	}
 	parts := strings.Split(strings.ToLower(value), "x")
@@ -706,6 +717,9 @@ func otuapiAspectRatioFromSize(size string) string {
 	width, height := parsePositiveInt(parts[0]), parsePositiveInt(parts[1])
 	if width <= 0 || height <= 0 {
 		return ""
+	}
+	if ratio, ok := canonicalSupportedImageAspectRatio(width, height); ok {
+		return ratio
 	}
 	return reduceRatio(width, height)
 }

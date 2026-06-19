@@ -16,10 +16,38 @@ import (
 
 var geminiGenerateHTTPClient = &http.Client{Timeout: 65 * time.Second}
 
+type imageAspectRatioOption struct {
+	width  int
+	height int
+	value  string
+}
+
+var supportedImageAspectRatios = []imageAspectRatioOption{
+	{1, 1, "1:1"},
+	{16, 9, "16:9"},
+	{9, 16, "9:16"},
+	{3, 2, "3:2"},
+	{2, 3, "2:3"},
+	{4, 3, "4:3"},
+	{3, 4, "3:4"},
+	{5, 4, "5:4"},
+	{4, 5, "4:5"},
+	{7, 3, "7:3"},
+	{3, 7, "3:7"},
+	{21, 9, "21:9"},
+	{9, 21, "9:21"},
+	{2, 1, "2:1"},
+	{1, 2, "1:2"},
+	{3, 1, "3:1"},
+	{1, 3, "1:3"},
+}
+
+const supportedImageAspectRatioTolerance = 0.01
+
 type GeminiPart struct {
 	Text             string                  `json:"text,omitempty"`
-	InlineData       *GeminiInlineData      `json:"inlineData,omitempty"`
-	FunctionCall     *GeminiFunctionCall    `json:"functionCall,omitempty"`
+	InlineData       *GeminiInlineData       `json:"inlineData,omitempty"`
+	FunctionCall     *GeminiFunctionCall     `json:"functionCall,omitempty"`
 	FunctionResponse *GeminiFunctionResponse `json:"function_response,omitempty"`
 	ImageURL         *struct {
 		URL string `json:"url,omitempty"`
@@ -248,10 +276,10 @@ func geminiChatCompletions(channel model.ModelChannel, body []byte) ([]byte, str
 
 func geminiImageGenerations(channel model.ModelChannel, body []byte) ([]byte, string, error) {
 	var payload struct {
-		Model  string `json:"model"`
-		Prompt string `json:"prompt"`
-		N      int    `json:"n"`
-		Size   string `json:"size"`
+		Model   string `json:"model"`
+		Prompt  string `json:"prompt"`
+		N       int    `json:"n"`
+		Size    string `json:"size"`
 		Quality string `json:"quality"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -267,7 +295,7 @@ func geminiImageGenerations(channel model.ModelChannel, body []byte) ([]byte, st
 	images := make([]map[string]string, 0, count)
 	for i := 0; i < count; i++ {
 		requestBody, _ := json.Marshal(GeminiGenerateRequest{
-			Contents: []GeminiContent{{Role: "user", Parts: []GeminiPart{{Text: payload.Prompt}}}},
+			Contents:         []GeminiContent{{Role: "user", Parts: []GeminiPart{{Text: payload.Prompt}}}},
 			GenerationConfig: geminiImageGenerationConfig(channel, payload.Model, payload.Size, payload.Quality),
 		})
 		responseBody, err := doGeminiGenerate(channel, payload.Model, requestBody)
@@ -331,6 +359,11 @@ func geminiAspectRatioFromSize(size string) string {
 		return ""
 	}
 	if strings.Contains(value, ":") {
+		if width, height, ok := parseAspectRatioPair(value, ":"); ok {
+			if ratio, ok := canonicalSupportedImageAspectRatio(width, height); ok {
+				return ratio
+			}
+		}
 		return value
 	}
 	parts := strings.Split(strings.ToLower(value), "x")
@@ -341,7 +374,46 @@ func geminiAspectRatioFromSize(size string) string {
 	if width <= 0 || height <= 0 {
 		return ""
 	}
+	if ratio, ok := canonicalSupportedImageAspectRatio(width, height); ok {
+		return ratio
+	}
 	return reduceRatio(width, height)
+}
+
+func parseAspectRatioPair(value string, separator string) (int, int, bool) {
+	parts := strings.Split(value, separator)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	width, height := parsePositiveInt(parts[0]), parsePositiveInt(parts[1])
+	return width, height, width > 0 && height > 0
+}
+
+func canonicalSupportedImageAspectRatio(width int, height int) (string, bool) {
+	if width <= 0 || height <= 0 {
+		return "", false
+	}
+	bestRatio := ""
+	bestDelta := 1.0
+	actual := float64(width) / float64(height)
+	for _, option := range supportedImageAspectRatios {
+		if width*option.height == height*option.width {
+			return option.value, true
+		}
+		expected := float64(option.width) / float64(option.height)
+		delta := actual/expected - 1
+		if delta < 0 {
+			delta = -delta
+		}
+		if delta < bestDelta {
+			bestDelta = delta
+			bestRatio = option.value
+		}
+	}
+	if bestDelta <= supportedImageAspectRatioTolerance {
+		return bestRatio, true
+	}
+	return "", false
 }
 
 func geminiBodyFromChatMessages(messages []OpenAIChatMessage) ([]byte, error) {

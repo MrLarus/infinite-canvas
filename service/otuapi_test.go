@@ -94,6 +94,43 @@ func TestOtuapiVideoCreatePathUsesCanonicalVideosEndpoint(t *testing.T) {
 	}
 }
 
+func TestOtuapiAsyncImageAspectRatioCanonicalizesGeneratedDimensions(t *testing.T) {
+	body, _ := json.Marshal(map[string]any{
+		"model": "gpt-image-2",
+		"size":  "1024x1824",
+	})
+	normalized, ok := otuapiNormalizeVideoJSONBody("gpt-image-2", body)
+	if !ok {
+		t.Fatalf("expected normalized body")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(normalized, &payload); err != nil {
+		t.Fatalf("decode normalized body: %v", err)
+	}
+	if got := payload["aspect_ratio"]; got != "9:16" {
+		t.Fatalf("aspect_ratio = %#v, want 9:16", got)
+	}
+	if _, ok := payload["size"]; ok {
+		t.Fatalf("size should be removed from normalized async image body: %#v", payload)
+	}
+
+	body, _ = json.Marshal(map[string]any{
+		"model":        "gpt-image-2",
+		"aspect_ratio": "32:57",
+	})
+	normalized, ok = otuapiNormalizeVideoJSONBody("gpt-image-2", body)
+	if !ok {
+		t.Fatalf("expected normalized aspect_ratio body")
+	}
+	payload = map[string]any{}
+	if err := json.Unmarshal(normalized, &payload); err != nil {
+		t.Fatalf("decode normalized aspect_ratio body: %v", err)
+	}
+	if got := payload["aspect_ratio"]; got != "9:16" {
+		t.Fatalf("aspect_ratio = %#v, want 9:16", got)
+	}
+}
+
 func TestOtuapiDoesNotUseGeminiNativeChatForTextProxy(t *testing.T) {
 	channel := model.ModelChannel{Protocol: "otuapi", BaseURL: "https://otuapi.com"}
 	if OtuapiUsesGeminiNativeChat(channel, "gemini-3.5-flash", "/chat/completions") {
@@ -112,8 +149,8 @@ func TestOtuapiResponsesRejectsKnownUnstableToolModels(t *testing.T) {
 		"model": "gemini-3.1-pro-preview",
 		"input": []map[string]any{{"role": "user", "content": "read state"}},
 		"tools": []map[string]any{{
-			"type": "function",
-			"name": "canvas_get_state",
+			"type":       "function",
+			"name":       "canvas_get_state",
 			"parameters": map[string]any{"type": "object", "properties": map[string]any{}},
 		}},
 	})
@@ -132,8 +169,8 @@ func TestOtuapiResponsesRejectsGemini35FlashToolCalls(t *testing.T) {
 		"model": "gemini-3.5-flash",
 		"input": []map[string]any{{"role": "user", "content": "read state"}},
 		"tools": []map[string]any{{
-			"type": "function",
-			"name": "canvas_get_state",
+			"type":       "function",
+			"name":       "canvas_get_state",
 			"parameters": map[string]any{"type": "object", "properties": map[string]any{}},
 		}},
 	})
@@ -264,8 +301,8 @@ func TestOpenAICompatibleResponsesViaChatCompletionsPostsToChatCompletions(t *te
 		"model": "glm-4.6",
 		"input": []map[string]any{{"role": "user", "content": "hi"}},
 		"tools": []map[string]any{{
-			"type": "function",
-			"name": "canvas_get_state",
+			"type":       "function",
+			"name":       "canvas_get_state",
 			"parameters": map[string]any{"type": "object", "properties": map[string]any{}},
 		}},
 	})

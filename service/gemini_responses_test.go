@@ -18,7 +18,7 @@ func TestGeminiGenerateRequestFromResponsesIncludesFunctionResponseName(t *testi
 			Type:        "function",
 			Name:        "canvas_get_state",
 			Description: "Read canvas state",
-			Parameters: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+			Parameters:  map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
 		}},
 		ToolChoice: "required",
 	})
@@ -65,6 +65,23 @@ func TestGeminiResponsesPayloadFromGenerateConvertsFunctionCall(t *testing.T) {
 	}
 	if payload.Output[0]["call_id"] == "" {
 		t.Fatalf("missing call_id: %#v", payload.Output[0])
+	}
+}
+
+func TestGeminiAspectRatioFromSizeCanonicalizesGeneratedDimensions(t *testing.T) {
+	cases := map[string]string{
+		"1024x1824": "9:16",
+		"1824x1024": "16:9",
+		"1024x1360": "3:4",
+		"1360x1024": "4:3",
+		"9:16":      "9:16",
+		"32:57":     "9:16",
+		"1000x1000": "1:1",
+	}
+	for size, want := range cases {
+		if got := geminiAspectRatioFromSize(size); got != want {
+			t.Fatalf("geminiAspectRatioFromSize(%q) = %q, want %q", size, got, want)
+		}
 	}
 }
 

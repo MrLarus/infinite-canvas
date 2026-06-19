@@ -98,6 +98,26 @@ const IMAGE_MAX_PIXELS = 8294400;
 const IMAGE_MAX_EDGE = 3840;
 const IMAGE_MAX_RATIO = 3;
 const IMAGE_OUTPUT_FORMAT = "png";
+const IMAGE_ASPECT_RATIO_TOLERANCE = 0.01;
+const SUPPORTED_IMAGE_ASPECT_RATIOS = [
+    { width: 1, height: 1, value: "1:1" },
+    { width: 16, height: 9, value: "16:9" },
+    { width: 9, height: 16, value: "9:16" },
+    { width: 3, height: 2, value: "3:2" },
+    { width: 2, height: 3, value: "2:3" },
+    { width: 4, height: 3, value: "4:3" },
+    { width: 3, height: 4, value: "3:4" },
+    { width: 5, height: 4, value: "5:4" },
+    { width: 4, height: 5, value: "4:5" },
+    { width: 7, height: 3, value: "7:3" },
+    { width: 3, height: 7, value: "3:7" },
+    { width: 21, height: 9, value: "21:9" },
+    { width: 9, height: 21, value: "9:21" },
+    { width: 2, height: 1, value: "2:1" },
+    { width: 1, height: 2, value: "1:2" },
+    { width: 3, height: 1, value: "3:1" },
+    { width: 1, height: 3, value: "1:3" },
+] as const;
 
 function normalizeQuality(quality: string) {
     const value = quality.trim().toLowerCase();
@@ -513,14 +533,37 @@ function asyncImageAspectRatio(size: string) {
 function sizeToAspectRatio(size: string) {
     const value = size.trim();
     if (!value || value === "auto") return "auto";
-    if (value.includes(":")) return value;
+    if (value.includes(":")) return canonicalSupportedAspectRatio(value) || value;
     const match = value.match(/^(\d+)x(\d+)$/);
     if (!match) return value;
     const width = Number(match[1]);
     const height = Number(match[2]);
     if (!width || !height) return value;
+    const canonical = canonicalSupportedAspectRatio(`${width}:${height}`);
+    if (canonical) return canonical;
     const divisor = gcd(width, height);
     return `${width / divisor}:${height / divisor}`;
+}
+
+function canonicalSupportedAspectRatio(value: string) {
+    const match = value.match(/^(\d+):(\d+)$/);
+    if (!match) return "";
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!width || !height) return "";
+    let best = "";
+    let bestDelta = Number.POSITIVE_INFINITY;
+    const actual = width / height;
+    for (const option of SUPPORTED_IMAGE_ASPECT_RATIOS) {
+        if (width * option.height === height * option.width) return option.value;
+        const expected = option.width / option.height;
+        const delta = Math.abs(actual / expected - 1);
+        if (delta < bestDelta) {
+            bestDelta = delta;
+            best = option.value;
+        }
+    }
+    return bestDelta <= IMAGE_ASPECT_RATIO_TOLERANCE ? best : "";
 }
 
 function gcd(a: number, b: number): number {
