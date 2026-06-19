@@ -18,7 +18,7 @@ const store = localforage.createInstance({ name: "infinite-canvas", storeName: "
 const objectUrls = new Map<string, string>();
 
 export async function uploadImage(input: string | Blob): Promise<UploadedImage> {
-    const blob = typeof input === "string" ? await (await fetch(input)).blob() : input;
+    const blob = typeof input === "string" ? await imageInputToBlob(input) : input;
     const storageKey = `image:${nanoid()}`;
     await store.setItem(storageKey, blob);
     const url = URL.createObjectURL(blob);
@@ -89,4 +89,22 @@ function blobToDataUrl(blob: Blob) {
         reader.onerror = () => reject(new Error("读取图片失败"));
         reader.readAsDataURL(blob);
     });
+}
+
+async function imageInputToBlob(input: string) {
+    if (input.startsWith("data:")) return dataUrlToBlob(input);
+    return (await fetch(input)).blob();
+}
+
+function dataUrlToBlob(dataUrl: string) {
+    const [header, content] = dataUrl.split(",", 2);
+    if (!content) throw new Error("图片数据格式不正确");
+    const mimeType = header.match(/^data:([^;]+)/)?.[1] || "image/png";
+    const isBase64 = /;base64/i.test(header);
+    const binary = isBase64 ? atob(content) : decodeURIComponent(content);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+    }
+    return new Blob([bytes], { type: mimeType });
 }
