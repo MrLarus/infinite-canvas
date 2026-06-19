@@ -1,7 +1,10 @@
 package service
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -82,6 +85,76 @@ func TestGeminiAspectRatioFromSizeCanonicalizesGeneratedDimensions(t *testing.T)
 		if got := geminiAspectRatioFromSize(size); got != want {
 			t.Fatalf("geminiAspectRatioFromSize(%q) = %q, want %q", size, got, want)
 		}
+	}
+}
+
+func TestGeminiFirstImageConvertsTopLevelURLToBase64(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "image/png")
+		_, _ = response.Write([]byte("image-from-data-url"))
+	}))
+	defer server.Close()
+
+	image, err := geminiFirstImage(GeminiGenerateResponse{
+		Data: []GeminiImageData{{URL: server.URL + "/image.png"}},
+	})
+	if err != nil {
+		t.Fatalf("geminiFirstImage returned error: %v", err)
+	}
+	want := base64.StdEncoding.EncodeToString([]byte("image-from-data-url"))
+	if image["b64_json"] != want {
+		t.Fatalf("b64_json = %q, want %q", image["b64_json"], want)
+	}
+	if image["url"] != "" {
+		t.Fatalf("should not return browser-fetched url: %#v", image)
+	}
+}
+
+func TestGeminiFirstImageConvertsPartImageURLToBase64(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "image/png")
+		_, _ = response.Write([]byte("image-from-part-url"))
+	}))
+	defer server.Close()
+
+	image, err := geminiFirstImage(GeminiGenerateResponse{
+		Candidates: []struct {
+			Content *GeminiContent `json:"content,omitempty"`
+		}{{
+			Content: &GeminiContent{Role: "model", Parts: []GeminiPart{{
+				ImageURL: &struct {
+					URL string `json:"url,omitempty"`
+				}{URL: server.URL + "/image.png"},
+			}}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("geminiFirstImage returned error: %v", err)
+	}
+	want := base64.StdEncoding.EncodeToString([]byte("image-from-part-url"))
+	if image["b64_json"] != want {
+		t.Fatalf("b64_json = %q, want %q", image["b64_json"], want)
+	}
+	if image["url"] != "" {
+		t.Fatalf("should not return browser-fetched url: %#v", image)
+	}
+}
+
+func TestGeminiFirstImageKeepsInlineDataAsBase64(t *testing.T) {
+	image, err := geminiFirstImage(GeminiGenerateResponse{
+		Candidates: []struct {
+			Content *GeminiContent `json:"content,omitempty"`
+		}{{
+			Content: &GeminiContent{Role: "model", Parts: []GeminiPart{{
+				InlineData: &GeminiInlineData{MimeType: "image/png", Data: "already-base64"},
+			}}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("geminiFirstImage returned error: %v", err)
+	}
+	if image["b64_json"] != "already-base64" {
+		t.Fatalf("image = %#v", image)
 	}
 }
 

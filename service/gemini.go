@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -15,6 +16,9 @@ import (
 )
 
 var geminiGenerateHTTPClient = &http.Client{Timeout: 65 * time.Second}
+var geminiImageFetchHTTPClient = &http.Client{Timeout: 60 * time.Second}
+
+const geminiImageDownloadMaxBytes int64 = 35 << 20
 
 type imageAspectRatioOption struct {
 	width  int
@@ -105,12 +109,18 @@ type GeminiGenerateResponse struct {
 	Candidates []struct {
 		Content *GeminiContent `json:"content,omitempty"`
 	} `json:"candidates,omitempty"`
+	Data           []GeminiImageData `json:"data,omitempty"`
 	PromptFeedback *struct {
 		BlockReason string `json:"blockReason,omitempty"`
 	} `json:"promptFeedback,omitempty"`
 	Error *struct {
 		Message string `json:"message,omitempty"`
 	} `json:"error,omitempty"`
+}
+
+type GeminiImageData struct {
+	URL     string `json:"url,omitempty"`
+	B64JSON string `json:"b64_json,omitempty"`
 }
 
 type OpenAIChatMessage struct {
@@ -735,9 +745,25 @@ func geminiResponsesPayloadFromGenerate(payload GeminiGenerateResponse, fallback
 }
 
 func geminiFirstImage(payload GeminiGenerateResponse) (map[string]string, error) {
+	for _, item := range payload.Data {
+		if item.B64JSON != "" {
+			return map[string]string{"b64_json": item.B64JSON}, nil
+		}
+		if item.URL != "" {
+			encoded, err := geminiFetchImageURLAsBase64(item.URL)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]string{"b64_json": encoded}, nil
+		}
+	}
 	for _, part := range geminiParts(payload) {
 		if part.ImageURL != nil && part.ImageURL.URL != "" {
-			return map[string]string{"url": part.ImageURL.URL}, nil
+			encoded, err := geminiFetchImageURLAsBase64(part.ImageURL.URL)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]string{"b64_json": encoded}, nil
 		}
 		if part.InlineData == nil || part.InlineData.Data == "" {
 			continue
@@ -745,6 +771,39 @@ func geminiFirstImage(payload GeminiGenerateResponse) (map[string]string, error)
 		return map[string]string{"b64_json": part.InlineData.Data}, nil
 	}
 	return nil, safeMessageError{message: "Gemini 接口没有返回图片"}
+}
+
+func geminiFetchImageURLAsBase64(rawURL string) (string, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", safeMessageError{message: "Gemini 图片结果地址无效"}
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return "", safeMessageError{message: "Gemini 图片结果地址协议不支持"}
+	}
+	request, err := http.NewRequest(http.MethodGet, parsed.String(), nil)
+	if err != nil {
+		return "", safeMessageError{message: "Gemini 图片结果下载失败"}
+	}
+	response, err := geminiImageFetchHTTPClient.Do(request)
+	if err != nil {
+		return "", safeMessageError{message: "Gemini 图片结果下载失败"}
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= http.StatusBadRequest {
+		return "", safeMessageError{message: "Gemini 图片结果下载失败：" + strconv.Itoa(response.StatusCode)}
+	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, geminiImageDownloadMaxBytes+1))
+	if err != nil {
+		return "", safeMessageError{message: "Gemini 图片结果读取失败"}
+	}
+	if int64(len(body)) > geminiImageDownloadMaxBytes {
+		return "", safeMessageError{message: "Gemini 图片结果过大"}
+	}
+	if len(body) == 0 {
+		return "", safeMessageError{message: "Gemini 图片结果为空"}
+	}
+	return base64.StdEncoding.EncodeToString(body), nil
 }
 
 func setGeminiAuthHeader(request *http.Request, channel model.ModelChannel) {
