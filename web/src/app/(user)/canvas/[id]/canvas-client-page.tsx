@@ -9,7 +9,7 @@ import { saveAs } from "file-saver";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
-import { defaultConfig, resolveImageSize, resolveVideoSize, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { defaultConfig, rememberLastImageGenerationSettings, resolveImageSize, resolveVideoSize, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -2107,7 +2107,7 @@ function InfiniteCanvasPage() {
                     );
                     if (count > 1) finishGenerationRequest(rootId, controller);
                     if (controller.signal.aborted) return;
-                    if (hasSuccess && generationConfig.rememberLastImageSize !== "false") updateConfig("imageSize", generationConfig.size);
+                    if (hasSuccess) rememberLastImageGenerationSettings(generationConfig, updateConfig, { countKey: "canvasImageCount", count });
                     if (hasFailure) message.error(hasSuccess ? "部分图片生成失败" : "全部图片生成失败");
                     setNodes((prev) =>
                         prev.map((node) =>
@@ -2353,7 +2353,7 @@ function InfiniteCanvasPage() {
                             : item,
                     ),
                 );
-                if (generationConfig.rememberLastImageSize !== "false") updateConfig("imageSize", generationConfig.size);
+                rememberLastImageGenerationSettings(generationConfig, updateConfig, { rememberCount: false });
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : "生成失败";
@@ -2427,7 +2427,7 @@ function InfiniteCanvasPage() {
                             : item,
                     ),
                 );
-                if (generationConfig.rememberLastImageSize !== "false") updateConfig("imageSize", generationConfig.size);
+                rememberLastImageGenerationSettings(generationConfig, updateConfig, { rememberCount: false });
             } catch (error) {
                 if (isGenerationCanceled(error)) return;
                 const errorDetails = error instanceof Error ? error.message : "生成失败";

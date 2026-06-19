@@ -106,6 +106,22 @@ export function resolveImageSize(config: Pick<AiConfig, "imageSize" | "size">) {
     return config.imageSize || config.size || defaultConfig.imageSize;
 }
 
+export type UpdateAiConfig = <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
+
+export function rememberLastImageGenerationSettings(
+    config: Pick<AiConfig, "rememberLastImageSize" | "size" | "quality" | "count">,
+    updateConfig: UpdateAiConfig,
+    options: { countKey?: "count" | "canvasImageCount"; count?: string | number; rememberCount?: boolean } = {},
+) {
+    if (config.rememberLastImageSize === "false") return;
+    const size = (config.size || "").trim();
+    const quality = (config.quality || "").trim();
+    const count = String(options.count ?? config.count ?? "").trim();
+    if (size) updateConfig("imageSize", size);
+    if (quality) updateConfig("quality", quality);
+    if (options.rememberCount !== false && count) updateConfig(options.countKey || "count", count);
+}
+
 export function resolveVideoSize(config: Pick<AiConfig, "videoSize" | "size">) {
     return config.videoSize || config.size || defaultConfig.videoSize;
 }

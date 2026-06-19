@@ -13,7 +13,7 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/app/(user)/canvas/c
 import { canvasThemes } from "@/lib/canvas-theme";
 import { imageReferenceLabel } from "@/lib/image-reference-prompt";
 import { markAppDataDirty } from "@/services/app-sync-events";
-import { resolveImageSize, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { rememberLastImageGenerationSettings, resolveImageSize, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { useThemeStore } from "@/stores/use-theme-store";
 import { nanoid } from "nanoid";
 import { formatBytes, formatDuration, getDataUrlByteSize, readImageMeta } from "@/lib/image-utils";
@@ -202,7 +202,7 @@ export default function ImagePage() {
                     images: logImages,
                 }),
             );
-            if (successCount && snapshot.config.rememberLastImageSize !== "false") updateConfig("imageSize", snapshot.config.size);
+            if (successCount) rememberLastImageGenerationSettings(snapshot.config, updateConfig, { count: generationCount });
             successCount ? message.success("图片已生成") : message.error(failed?.reason instanceof Error ? failed.reason.message : "生成失败");
         } finally {
             setRunning(false);
@@ -325,7 +325,7 @@ export default function ImagePage() {
         setResults((value) => updateResultAt(value, index, { status: "pending", error: undefined, image: undefined }));
         void runGenerationSlot(index, snapshot)
             .then(() => {
-                if (snapshot.config.rememberLastImageSize !== "false") updateConfig("imageSize", snapshot.config.size);
+                rememberLastImageGenerationSettings(snapshot.config, updateConfig, { rememberCount: false });
             })
             .catch(() => {});
     };

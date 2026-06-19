@@ -7,7 +7,7 @@ import { motion } from "motion/react";
 
 import { ImageGenerationPending } from "@/components/image-generation-pending";
 import { ModelPicker } from "@/components/model-picker";
-import { resolveImageSize, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
+import { rememberLastImageGenerationSettings, resolveImageSize, useConfigStore, useEffectiveConfig, type AiConfig } from "@/stores/use-config-store";
 import { CreditSymbol, requestCreditCost } from "@/constant/credits";
 import { canvasThemes } from "@/lib/canvas-theme";
 import { nanoid } from "nanoid";
@@ -184,7 +184,7 @@ export function CanvasAssistantPanel({ nodes, selectedNodeIds, sessions, activeS
                     images: storedImages.map((image, index) => ({ id: images[index].id, dataUrl: image.url, storageKey: image.storageKey, prompt: text })),
                     isLoading: false,
                 });
-                if (requestConfig.rememberLastImageSize !== "false") updateConfig("imageSize", requestConfig.size);
+                rememberLastImageGenerationSettings(requestConfig, updateConfig, { countKey: "canvasImageCount" });
                 return;
             }
 

@@ -331,7 +331,7 @@ export function AppConfigModal() {
                         <Form.Item label="默认生图比例" extra="新建画布生图和图片工作台默认使用，单个节点仍可单独覆盖。" className="mb-4">
                             <Select value={config.imageSize} options={imageGenerationSizeOptions} onChange={(value) => updateConfig("imageSize", value)} />
                         </Form.Item>
-                        <Form.Item label="自动记住生图比例" extra="开启后，实际生图时会把本次比例保存为新的默认生图比例。" className="mb-4">
+                        <Form.Item label="自动记住生图设置" extra="开启后，生图成功会记住本次质量、尺寸和张数，作为下次默认值。" className="mb-4">
                             <Switch checked={config.rememberLastImageSize !== "false"} onChange={(checked) => updateConfig("rememberLastImageSize", String(checked))} />
                         </Form.Item>
                         <Form.Item label="默认生视频比例" extra="新建画布视频节点和视频创作台默认使用，单个节点仍可单独覆盖。" className="mb-4">
