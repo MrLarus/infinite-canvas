@@ -9,7 +9,7 @@ import { saveAs } from "file-saver";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/services/api/image";
 import { requestAudioGeneration, storeGeneratedAudio } from "@/services/api/audio";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/services/api/video";
-import { defaultConfig, rememberLastImageGenerationSettings, resolveImageSize, resolveVideoSize, type AiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
+import { defaultConfig, rememberLastImageGenerationSettings, resolveImageSize, resolveVideoSize, type AiConfig, type UpdateAiConfig, useConfigStore, useEffectiveConfig } from "@/stores/use-config-store";
 import { resolveImageUrl, uploadImage, type UploadedImage } from "@/services/image-storage";
 import { resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/services/file-storage";
 import { nanoid } from "nanoid";
@@ -71,6 +71,11 @@ type CanvasClipboard = {
 type PendingConnectionCreate = {
     connection: ConnectionHandle;
     position: Position;
+};
+
+type LastCreateNodeTemplate = {
+    type: CanvasNodeType;
+    metadata?: CanvasNodeMetadata;
 };
 
 type ConnectionDropTarget = {
@@ -322,6 +327,7 @@ function InfiniteCanvasPage() {
     const selectionBoxRef = useRef(selectionBox);
     const pendingConnectionCreateRef = useRef(pendingConnectionCreate);
     const generationRequestsRef = useRef(new Map<string, CanvasGenerationRequest>());
+    const lastCreateNodeTemplateRef = useRef<LastCreateNodeTemplate>({ type: CanvasNodeType.Config });
 
     const createHistoryEntry = useCallback(
         (): CanvasHistoryEntry => ({
@@ -760,25 +766,44 @@ function InfiniteCanvasPage() {
         setAgentUndoSnapshot(null);
         return { ...agentUndoSnapshot, projectId, title: currentProject?.title || "未命名画布" };
     }, [agentUndoSnapshot, currentProject?.title, projectId]);
+    const addCreatedNode = useCallback((node: CanvasNodeData, options: { rememberTemplate?: boolean } = {}) => {
+        setNodes((prev) => [...prev, node]);
+        setSelectedNodeIds(new Set([node.id]));
+        setSelectedConnectionId(null);
+        if (node.type !== CanvasNodeType.Text && node.type !== CanvasNodeType.Audio) setDialogNodeId(node.id);
+        else setDialogNodeId(null);
+        if (options.rememberTemplate !== false) lastCreateNodeTemplateRef.current = templateFromNode(node);
+    }, []);
+
     const createNode = useCallback(
         (type: CanvasNodeType, position?: Position) => {
             const targetPosition = position || getCanvasCenter();
-            const configMetadata =
-                type === CanvasNodeType.Config
-                    ? {
-                          model: effectiveConfig.imageModel || effectiveConfig.model,
-                          size: resolveImageSize(effectiveConfig),
-                          count: getGenerationCount(effectiveConfig.canvasImageCount || effectiveConfig.count),
-                      }
-                    : undefined;
-            const newNode = createCanvasNode(type, targetPosition, configMetadata);
-
-            setNodes((prev) => [...prev, newNode]);
-            setSelectedNodeIds(new Set([newNode.id]));
-            setSelectedConnectionId(null);
-            if (type !== CanvasNodeType.Text && type !== CanvasNodeType.Audio) setDialogNodeId(newNode.id);
+            const metadata = type === CanvasNodeType.Config ? defaultConfigNodeMetadata(effectiveConfig) : undefined;
+            const newNode = createCanvasNode(type, targetPosition, metadata);
+            addCreatedNode(newNode);
         },
-        [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.imageSize, effectiveConfig.size, getCanvasCenter],
+        [addCreatedNode, effectiveConfig, getCanvasCenter],
+    );
+
+    const createNodeFromTemplate = useCallback(
+        (template: LastCreateNodeTemplate, position: Position) => {
+            const fallbackMetadata = template.type === CanvasNodeType.Config ? defaultConfigNodeMetadata(effectiveConfig) : undefined;
+            const templateMetadata = sanitizeNodeTemplateMetadata(template.type, template.metadata);
+            const metadata = fallbackMetadata || templateMetadata ? { ...fallbackMetadata, ...templateMetadata } : undefined;
+            const newNode = createCanvasNode(template.type, position, metadata);
+            addCreatedNode(newNode, { rememberTemplate: false });
+        },
+        [addCreatedNode, effectiveConfig],
+    );
+
+    const handleCanvasDoubleClick = useCallback(
+        (event: ReactMouseEvent<HTMLDivElement>) => {
+            if (pendingConnectionCreateRef.current) cancelPendingConnectionCreate();
+            setContextMenu(null);
+            const position = screenToCanvas(event.clientX, event.clientY);
+            createNodeFromTemplate(lastCreateNodeTemplateRef.current, position);
+        },
+        [cancelPendingConnectionCreate, createNodeFromTemplate, screenToCanvas],
     );
 
     const deleteNodes = useCallback(
@@ -1515,9 +1540,22 @@ function InfiniteCanvasPage() {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? { ...node, metadata: { ...node.metadata, prompt } } : node)));
     }, []);
 
-    const handleConfigNodeChange = useCallback((nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyNodeConfigPatch(node, patch) : node)));
-    }, []);
+    const handleConfigNodeChange = useCallback(
+        (nodeId: string, patch: Partial<CanvasNodeData["metadata"]>) => {
+            const safePatch = patch || {};
+            setNodes((prev) =>
+                prev.map((node) => {
+                    if (node.id !== nodeId) return node;
+                    const next = applyNodeConfigPatch(node, safePatch);
+                    const mode = (safePatch.generationMode || next.metadata?.generationMode || node.metadata?.generationMode || "image") as CanvasNodeGenerationMode;
+                    syncGenerationDefaultsFromPatch(mode, safePatch, updateConfig);
+                    lastCreateNodeTemplateRef.current = templateFromNode(next);
+                    return next;
+                }),
+            );
+        },
+        [updateConfig],
+    );
 
     const downloadNodeImage = useCallback((node: CanvasNodeData) => {
         if ((node.type !== CanvasNodeType.Image && node.type !== CanvasNodeType.Video && node.type !== CanvasNodeType.Audio) || !node.metadata?.content) return;
@@ -2588,6 +2626,7 @@ function InfiniteCanvasPage() {
                         setContextMenu(null);
                     }}
                     onCanvasMouseDown={handleCanvasMouseDown}
+                    onCanvasDoubleClick={handleCanvasDoubleClick}
                     onCanvasDeselect={deselectCanvas}
                     onContextMenu={preventCanvasContextMenu}
                     onDrop={handleDrop}
@@ -3224,6 +3263,67 @@ async function hydrateAssistantImages(sessions: CanvasAssistantSession[]) {
 
 function getGenerationCount(count: string) {
     return Math.max(1, Math.min(15, Math.floor(Math.abs(Number(count)) || 1)));
+}
+
+function defaultConfigNodeMetadata(config: AiConfig): CanvasNodeMetadata {
+    return {
+        model: config.imageModel || config.model,
+        size: resolveImageSize(config),
+        quality: config.quality,
+        count: getGenerationCount(config.canvasImageCount || config.count),
+        generationMode: "image",
+    };
+}
+
+function sanitizeNodeTemplateMetadata(type: CanvasNodeType, metadata?: CanvasNodeMetadata): CanvasNodeMetadata | undefined {
+    if (!metadata) return type === CanvasNodeType.Config ? {} : undefined;
+    const {
+        content,
+        status,
+        errorDetails,
+        naturalWidth,
+        naturalHeight,
+        storageKey,
+        mimeType,
+        bytes,
+        durationMs,
+        isBatchRoot,
+        batchRootId,
+        batchChildIds,
+        batchUsesReferenceImages,
+        primaryImageId,
+        imageBatchExpanded,
+        references,
+        ...rest
+    } = metadata;
+    return { ...rest, status: undefined, errorDetails: undefined, references: references?.length ? [...references] : undefined };
+}
+
+function templateFromNode(node: CanvasNodeData): LastCreateNodeTemplate {
+    return {
+        type: node.type,
+        metadata: sanitizeNodeTemplateMetadata(node.type, node.metadata),
+    };
+}
+
+function syncGenerationDefaultsFromPatch(mode: CanvasNodeGenerationMode, patch: Partial<CanvasNodeMetadata>, updateConfig: UpdateAiConfig) {
+    if (typeof patch.quality === "string") updateConfig("quality", patch.quality);
+    if (typeof patch.count === "number" && Number.isFinite(patch.count)) updateConfig(mode === "image" ? "canvasImageCount" : "count", String(getGenerationCount(String(patch.count))));
+    if (typeof patch.size === "string") updateConfig(mode === "video" ? "videoSize" : "imageSize", patch.size);
+    if (typeof patch.seconds === "string") updateConfig("videoSeconds", patch.seconds);
+    if (typeof patch.vquality === "string") updateConfig("vquality", patch.vquality);
+    if (typeof patch.generateAudio === "string") updateConfig("videoGenerateAudio", patch.generateAudio);
+    if (typeof patch.watermark === "string") updateConfig("videoWatermark", patch.watermark);
+    if (typeof patch.audioVoice === "string") updateConfig("audioVoice", patch.audioVoice);
+    if (typeof patch.audioFormat === "string") updateConfig("audioFormat", patch.audioFormat);
+    if (typeof patch.audioSpeed === "string") updateConfig("audioSpeed", patch.audioSpeed);
+    if (typeof patch.audioInstructions === "string") updateConfig("audioInstructions", patch.audioInstructions);
+    if (typeof patch.model === "string") {
+        if (mode === "image") updateConfig("imageModel", patch.model);
+        else if (mode === "video") updateConfig("videoModel", patch.model);
+        else if (mode === "audio") updateConfig("audioModel", patch.model);
+        else updateConfig("textModel", patch.model);
+    }
 }
 
 function applyNodeConfigPatch(node: CanvasNodeData, patch: Partial<CanvasNodeData["metadata"]>) {
