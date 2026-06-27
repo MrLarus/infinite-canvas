@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { App, Button } from "antd";
 import { Download, FileUp, Plus } from "lucide-react";
 
@@ -16,9 +16,19 @@ import { useCanvasUiStore } from "./stores/use-canvas-ui-store";
 import { exportCanvasProjects } from "./utils/canvas-export";
 
 export default function CanvasPage() {
+    return (
+        <Suspense fallback={<main className="flex h-full items-center justify-center bg-background text-sm text-stone-500">正在加载画布...</main>}>
+            <CanvasProjectList />
+        </Suspense>
+    );
+}
+
+function CanvasProjectList() {
     const { message } = App.useApp();
     const router = useRouter();
+    const searchParams = useSearchParams();
     const inputRef = useRef<HTMLInputElement>(null);
+    const autoOpenRef = useRef(false);
     const hydrated = useCanvasStore((state) => state.hydrated);
     const projects = useCanvasStore((state) => state.projects);
     const createProject = useCanvasStore((state) => state.createProject);
@@ -26,9 +36,13 @@ export default function CanvasPage() {
     const selectedIds = useCanvasUiStore((state) => state.selectedProjectIds);
     const setDeleteIds = useCanvasUiStore((state) => state.setDeleteProjectIds);
 
-    const enterProject = (id: string) => {
-        router.push(`/canvas/${id}`);
-    };
+    const mode = searchParams.get("mode");
+    const agentMode = mode === "new" || mode === "recent" || mode === "choose";
+    const agentQuery = agentMode && searchParams.toString() ? `?${searchParams.toString()}` : "";
+
+    const enterProject = useCallback((id: string) => {
+        router.push(`/canvas/${id}${agentQuery}`);
+    }, [agentQuery, router]);
     const createAndEnter = () => enterProject(createProject(`无限画布 ${projects.length + 1}`));
     const importCanvas = async (file?: File) => {
         if (!file) return;
@@ -55,6 +69,15 @@ export default function CanvasPage() {
             if (inputRef.current) inputRef.current.value = "";
         }
     };
+
+    useEffect(() => {
+        if (!hydrated || autoOpenRef.current || (mode !== "new" && mode !== "recent")) return;
+        autoOpenRef.current = true;
+        const id = mode === "new" ? createProject(`无限画布 ${projects.length + 1}`) : projects[0]?.id || createProject(`无限画布 ${projects.length + 1}`);
+        enterProject(id);
+    }, [createProject, enterProject, hydrated, mode, projects]);
+
+    if (hydrated && (mode === "new" || mode === "recent")) return <main className="flex h-full items-center justify-center bg-background text-sm text-stone-500">正在打开画布...</main>;
 
     return (
         <main className="h-full overflow-auto bg-background text-stone-950 dark:text-stone-100">

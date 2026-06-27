@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Bot, Home, ImageIcon, Images, List, Menu, MessageSquare, Music2, Plus, Redo2, Settings2, Sparkles, Trash2, Undo2, Upload, Video } from "lucide-react";
 import { saveAs } from "file-saver";
 
@@ -43,6 +43,7 @@ import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "../compone
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import { AssetPickerModal, type AssetPickerTab, type InsertAssetPayload } from "../components/asset-picker-modal";
 import { CanvasZoomControls } from "../components/canvas-zoom-controls";
+import { useCanvasAgentStore } from "../stores/use-canvas-agent-store";
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
@@ -224,7 +225,11 @@ function InfiniteCanvasPage() {
     const { message, modal } = App.useApp();
     const params = useParams<{ id: string }>();
     const router = useRouter();
+    const searchParams = useSearchParams();
     const projectId = params.id;
+    const localAgentConnected = useCanvasAgentStore((state) => state.connected);
+    const localAgentEnabled = useCanvasAgentStore((state) => state.enabled);
+    const localAgentActivity = useCanvasAgentStore((state) => state.activity);
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: Position } | null>(null);
@@ -237,6 +242,7 @@ function InfiniteCanvasPage() {
     const historyPausedRef = useRef(false);
     const didInitialCenterRef = useRef(false);
     const rafRef = useRef<number | null>(null);
+    const codexAutoOpenRef = useRef(false);
     const toolbarHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const nodeDraggingRef = useRef(false);
     const dragRef = useRef<{
@@ -316,6 +322,8 @@ function InfiniteCanvasPage() {
     const [collapsingBatchIds, setCollapsingBatchIds] = useState<Set<string>>(new Set());
     const [openingBatchIds, setOpeningBatchIds] = useState<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
+    const codexAgentMode = ["new", "recent", "choose"].includes(searchParams.get("mode") || "");
+    const codexCompactAgent = codexAgentMode && searchParams.has("agentUrl");
 
     const nodesRef = useRef(nodes);
     const connectionsRef = useRef(connections);
@@ -457,6 +465,13 @@ function InfiniteCanvasPage() {
             }
         };
     }, [activeChatId, backgroundMode, chatSessions, connections, createHistoryEntry, nodes, projectLoaded, showImageInfo]);
+
+    useEffect(() => {
+        if (!projectLoaded || !codexAgentMode || codexAutoOpenRef.current) return;
+        codexAutoOpenRef.current = true;
+        setLocalAgentMounted(true);
+        setLocalAgentCollapsed(codexCompactAgent);
+    }, [codexAgentMode, codexCompactAgent, projectLoaded]);
 
     useEffect(() => {
         if (!projectLoaded || historyPausedRef.current) return;
@@ -2609,6 +2624,7 @@ function InfiniteCanvasPage() {
                     assistantCollapsed={assistantCollapsed}
                     localAgentOpen={localAgentOpen}
                     websiteAgentOpen={websiteAgentMounted}
+                    compactAgentStatus={codexCompactAgent ? { connected: localAgentConnected, enabled: localAgentEnabled, activity: localAgentActivity } : undefined}
                     onExpandAssistant={() => {
                         setAssistantMounted(true);
                         setAssistantCollapsed(false);
@@ -2926,6 +2942,7 @@ function InfiniteCanvasPage() {
                     onApplyOps={applyAgentOps}
                     onUndoOps={undoAgentOps}
                     onCollapseStart={closeLocalAgent}
+                    autoConnect={codexAgentMode}
                 />
             ) : null}
             {websiteAgentMounted ? <CanvasWebsiteAgentPanel snapshot={agentSnapshot} onApplyOps={applyAgentOps} onCollapse={() => setWebsiteAgentMounted(false)} /> : null}
@@ -2953,6 +2970,7 @@ function CanvasTopBar({
     assistantCollapsed,
     localAgentOpen,
     websiteAgentOpen,
+    compactAgentStatus,
     onExpandAssistant,
     onToggleLocalAgent,
     onToggleWebsiteAgent,
@@ -2976,6 +2994,7 @@ function CanvasTopBar({
     assistantCollapsed: boolean;
     localAgentOpen: boolean;
     websiteAgentOpen: boolean;
+    compactAgentStatus?: { connected: boolean; enabled: boolean; activity: string };
     onExpandAssistant: () => void;
     onToggleLocalAgent: () => void;
     onToggleWebsiteAgent: () => void;
@@ -3059,6 +3078,7 @@ function CanvasTopBar({
                 </div>
 
                 <div className="pointer-events-auto flex items-center gap-1.5">
+                    {compactAgentStatus ? <CompactAgentStatus status={compactAgentStatus} onClick={onToggleLocalAgent} /> : null}
                     <UserStatusActions
                         variant="canvas"
                         accountOpen={accountOpen}
@@ -3131,6 +3151,25 @@ function MenuLabel({ text, shortcut }: { text: string; shortcut: string }) {
             <span>{text}</span>
             <span className="text-xs opacity-45">{shortcut}</span>
         </span>
+    );
+}
+
+function CompactAgentStatus({ status, onClick }: { status: { connected: boolean; enabled: boolean; activity: string }; onClick: () => void }) {
+    const colorTheme = useThemeStore((state) => state.theme);
+    const theme = canvasThemes[colorTheme];
+    const label = status.connected ? "已连接到本地 Codex" : status.enabled ? status.activity || "连接中" : "正在连接本地 Codex";
+    const dotColor = status.connected ? "#22c55e" : status.enabled ? "#f59e0b" : theme.node.muted;
+    return (
+        <button
+            type="button"
+            className="flex h-10 items-center gap-2 rounded-xl px-3 text-sm font-medium transition hover:opacity-85"
+            style={{ background: theme.toolbar.panel, color: theme.node.text, boxShadow: "0 10px 30px rgba(28,25,23,.10)" }}
+            onClick={onClick}
+            title="打开本地 Codex 面板"
+        >
+            <span className="size-2 rounded-full" style={{ background: dotColor }} />
+            <span className="max-w-[180px] truncate">{label}</span>
+        </button>
     );
 }
 
